@@ -1,12 +1,19 @@
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Thread {
-    pub tid: u32,
+    pub tid: Tid,
 }
 
+pub type Tid = u32;
+
 impl Thread {
-    pub fn new(tid: u32) -> Self {
+    pub fn new(tid: Tid) -> Self {
         Thread {
-            tid
+            tid,
         }
     }
 }
+
+//impl<'a> From<()> for Thread<'a> {
+//    fn from(value: ()) -> Self {
+//    }
+//}
