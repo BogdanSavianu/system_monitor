@@ -1,7 +1,15 @@
+use std::num::ParseIntError;
+
 #[derive(Debug)]
 pub enum ParseError {
     NonExistingResource(u32),
     ParsingError(String)
+}
+
+impl From<ParseIntError> for ParseError {
+    fn from(err: ParseIntError) -> ParseError {
+        ParseError::ParsingError(err.to_string())
+    }
 }
 
 pub fn extract_pid_from_path(path: &String) -> Result<u32, ParseError> {

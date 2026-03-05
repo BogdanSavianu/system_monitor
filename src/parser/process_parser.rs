@@ -1,6 +1,5 @@
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
-use std::num::ParseIntError;
 
 use crate::process::Process;
 use crate::state::SystemState;
@@ -11,11 +10,6 @@ const BASE_PROC_PATH: &str = "/proc";
 
 pub struct ProcessParser;
 
-impl From<ParseIntError> for ParseError {
-    fn from(err: ParseIntError) -> ParseError {
-        ParseError::ParsingError(err.to_string())
-    }
-}
 
 impl ProcessParser {
     pub fn new() -> Self {
