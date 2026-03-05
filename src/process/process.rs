@@ -9,9 +9,11 @@ pub struct Process {
     pub pid: Pid,
     pub name: String,
     pub cmdline: String,
-    // Pm and Vm are both in KB
+    // Pm, Vm and Swap are both in KB
     pub physical_mem: Pm,
     pub virtual_mem: Vm,
+    pub swap_mem: Swap,
+    pub thread_count: u32,
 }
 
 impl Process {
@@ -22,6 +24,8 @@ impl Process {
             cmdline: "".into(),
             physical_mem: 0,
             virtual_mem: 0,
+            swap_mem: 0,
+            thread_count: 0,
         }
     }
 }
@@ -32,8 +36,10 @@ impl Display for Process {
 "Process id: {:?},
     Name: {:?},
     CmdLine: {:?},
+    Thread Count: {:?},
     Virtual Memory: {:?},
-    Physical Memory: {:?}",
-    self.pid, self.name, self.cmdline, self.virtual_mem, self.physical_mem)
+    Physical Memory: {:?},
+    Swap Memory: {:?}",
+    self.pid, self.name, self.cmdline, self.thread_count, self.virtual_mem, self.physical_mem, self.swap_mem)
     }
 }

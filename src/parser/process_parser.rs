@@ -1,6 +1,7 @@
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read};
 
+use crate::model::StatusFileModel;
 use crate::process::Process;
 use crate::state::SystemState;
 use crate::thread::Thread;
@@ -21,12 +22,14 @@ impl ProcessParser {
         let name = self.get_process_name(pid)?;
         let cmdline = self.get_process_cmdline(pid)?;
         let threads = self.get_threads_for_pid(pid)?;
-        let (vm, pm) = self.get_mem_info(pid)?;
+        let statuf_file_model = self.get_status_info(pid)?;
 
         process.name = name;
         process.cmdline = cmdline;
-        process.virtual_mem = vm;
-        process.physical_mem = pm;
+        process.virtual_mem = statuf_file_model.virtual_mem;
+        process.physical_mem = statuf_file_model.physical_mem;
+        process.swap_mem = statuf_file_model.swap_mem;
+        process.thread_count = statuf_file_model.thread_count;
 
         system_state.insert_process(process.clone());
         threads
@@ -50,52 +53,74 @@ impl ProcessParser {
         Ok(threads)
     }
 
-    pub fn get_mem_info(&self, pid: Pid) -> Result<(Vm, Pm), ParseError> {
+    pub fn get_status_info(&self, pid: Pid) -> Result<StatusFileModel, ParseError> {
         let file_path = format!("{BASE_PROC_PATH}/{pid}/status");
         let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
         let buf_reader = BufReader::new(file);
-        self.parse_mem_info(buf_reader)
+        self.parse_status_info(buf_reader)
     }
 
-    fn parse_mem_info<R>(&self, reader: R) -> Result<(Vm, Pm), ParseError>
+    fn parse_status_info<R>(&self, reader: R) -> Result<StatusFileModel, ParseError>
         where R: BufRead,
     {
         let mut vm_size: Option<Vm> = None;
-        let mut vm_rss: Option<Pm> = None;
+        let mut pm_size: Option<Pm> = None;
+        let mut swap_size: Option<Pm> = None;
+        let mut thread_count: Option<u32> = None;
 
         for line in reader.lines() {
             let line = line.map_err(|err| ParseError::ParsingError(err.to_string()))?;
+            let mut parts = line.split_whitespace();
+            let key = parts.next();
+            let value = parts.next();
 
-            if line.starts_with("VmSize:") {
-                let n = line
-                    .split_whitespace()
-                    .nth(1)
-                    .ok_or_else(|| ParseError::ParsingError("Could not parse VmSize".into()))?
-                    .parse::<u32>()
-                    .map_err(|err| ParseError::ParsingError(err.to_string()))?;
-                vm_size = Some(n as Vm);
-            } else if line.starts_with("VmRSS:") {
-                let n = line
-                    .split_whitespace()
-                    .nth(1)
-                    .ok_or_else(|| ParseError::ParsingError("Could not parse VmRSS".into()))?
-                    .parse::<u32>()
-                    .map_err(|err| ParseError::ParsingError(err.to_string()))?;
-                vm_rss = Some(n as Pm);
+            match (key, value) {
+                (Some("VmSize:"), Some(val)) => {
+                    vm_size = Some(
+                        val.parse::<u32>()
+                            .map_err(|err| ParseError::ParsingError(err.to_string()))? as Vm
+                    );
+                }
+
+                (Some("VmRSS:"), Some(val)) => {
+                    pm_size = Some(
+                        val.parse::<u32>()
+                            .map_err(|err| ParseError::ParsingError(err.to_string()))? as Pm
+                    );
+                }
+
+                (Some("VmSwap:"), Some(val)) => {
+                    swap_size = Some(
+                        val.parse::<u32>()
+                            .map_err(|err| ParseError::ParsingError(err.to_string()))? as Swap
+                    );
+                }
+
+                (Some("Threads:"), Some(val)) => {
+                    thread_count = Some(
+                        val.parse::<u32>()
+                            .map_err(|err| ParseError::ParsingError(err.to_string()))?
+                    );
+                }
+
+                _ => {}
             }
 
-            if vm_size.is_some() && vm_rss.is_some() {
+            if vm_size.is_some() && pm_size.is_some() && swap_size.is_some() && thread_count.is_some() {
                 break;
             }
+
         }
 
-        match (vm_size, vm_rss) {
-            (Some(vm), Some(pm)) => Ok((vm, pm)),
+        match (vm_size, pm_size, swap_size, thread_count) {
+            (Some(vm), Some(pm), Some(swap), Some(th_count)) 
+                => Ok(StatusFileModel::new(vm, pm, swap, th_count)),
             _ => Err(ParseError::ParsingError(
                 "VmSize or VmRSS not found in status".into(),
             )),
         }
     }
+
 
     pub fn get_process_name(&self, pid: Pid) -> Result<String, ParseError> {
         let file_path = format!("{BASE_PROC_PATH}/{pid}/comm");
