@@ -1,21 +1,23 @@
 use std::fmt::Display;
 
 pub use crate::thread::Thread;
+use crate::util::types::*;
 
 
 #[derive(Debug, Clone)]
 pub struct Process {
-    pub pid: u32,
-    //pub threads_list: Vec<Thread>
+    pub pid: Pid,
+    // Pm and Vm are both in KB
+    pub phys_mem: Pm,
+    pub virtual_mem: Vm,
 }
-
-pub type Pid = u32;
 
 impl Process {
     pub fn new(pid: Pid) -> Self {
         Process { 
             pid,
-            //threads_list: vec![]
+            phys_mem: 0,
+            virtual_mem: 0,
         }
     }
 }
@@ -23,7 +25,9 @@ impl Process {
 impl Display for Process {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, 
-"Process id: {:?}", 
-    self.pid, /*self.threads_list*/)
+"Process id: {:?},
+    Virtual Memory: {:?},
+    Physical Memory: {:?}",
+    self.pid, self.virtual_mem, self.phys_mem)
     }
 }

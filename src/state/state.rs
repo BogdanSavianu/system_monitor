@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{hashmap, process::{Pid, Process}, thread::{Thread, Tid}};
+use crate::{hashmap, process::Process, thread::Thread, util::types::*};
 
 #[derive(Debug)]
 pub struct SystemState {
