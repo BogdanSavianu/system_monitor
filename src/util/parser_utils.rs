@@ -1,5 +1,3 @@
-use std::num::ParseIntError;
-
 #[derive(Debug)]
 pub enum ParseError {
     NonExistingResource(u32),

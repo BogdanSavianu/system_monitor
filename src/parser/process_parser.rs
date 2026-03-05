@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Result as IOResult};
+use std::io::{BufRead, BufReader};
 use std::num::ParseIntError;
 
 use crate::process::Process;
@@ -28,7 +28,7 @@ impl ProcessParser {
         let threads = self.get_threads_for_pid(pid)?;
         let (vm, pm) = self.get_mem_info(pid)?;
         process.virtual_mem = vm;
-        process.phys_mem = pm;
+        process.physical_mem = pm;
 
         system_state.insert_process(process.clone());
         threads

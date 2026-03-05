@@ -8,7 +8,7 @@ use crate::util::types::*;
 pub struct Process {
     pub pid: Pid,
     // Pm and Vm are both in KB
-    pub phys_mem: Pm,
+    pub physical_mem: Pm,
     pub virtual_mem: Vm,
 }
 
@@ -16,7 +16,7 @@ impl Process {
     pub fn new(pid: Pid) -> Self {
         Process { 
             pid,
-            phys_mem: 0,
+            physical_mem: 0,
             virtual_mem: 0,
         }
     }
@@ -28,6 +28,6 @@ impl Display for Process {
 "Process id: {:?},
     Virtual Memory: {:?},
     Physical Memory: {:?}",
-    self.pid, self.virtual_mem, self.phys_mem)
+    self.pid, self.virtual_mem, self.physical_mem)
     }
 }
