@@ -4,14 +4,14 @@ use crate::util::parser_utils::*;
 
 pub use super::process_parser::*;
 
-pub struct Parser {
-    pub process_parser: ProcessParser
+pub struct Parser<ProcParser: TraitProcessParser> {
+    pub process_parser: ProcParser
 }
 
-impl Parser {
-    pub fn new() -> Self {
+impl<ProcParser: TraitProcessParser> Parser<ProcParser> {
+    pub fn new(process_parser: ProcParser) -> Self {
         Parser { 
-            process_parser: ProcessParser::new()
+            process_parser,
         }
     }
 

@@ -1,10 +1,11 @@
 use std::fs;
 
-use system_monitor::{parser::Parser, state::SystemState};
+use system_monitor::{parser::{Parser, ProcessParser}, state::SystemState};
 
 fn main() {
     let mut system_state = SystemState::new();
-    let parser = Parser::new();
+    let process_parser = ProcessParser::new();
+    let parser = Parser::new(process_parser);
 
     for entry in fs::read_dir("/proc").unwrap() {
         let process_path = entry.unwrap().path();

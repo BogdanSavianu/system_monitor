@@ -9,55 +9,19 @@ use crate::util::{types::*, parser_utils::*};
 
 const BASE_PROC_PATH: &str = "/proc";
 
+pub trait TraitProcessParser {
+    fn parse_process(&self, system_state: &mut SystemState, file_path: &String) -> Result<Process, ParseError>;
+    fn get_threads_for_pid(&self, pid: Pid) -> Result<Vec<Thread>, ParseError>;
+    fn get_status_info(&self, pid: Pid) -> Result<StatusFileModel, ParseError>;
+    fn get_process_name(&self, pid: Pid) -> Result<String, ParseError>;
+    fn get_process_cmdline(&self, pid: Pid) -> Result<String, ParseError>;
+}
+
 pub struct ProcessParser;
 
 impl ProcessParser {
     pub fn new() -> Self {
         ProcessParser {}
-    }
-
-    pub fn parse_process(&self, system_state: &mut SystemState, file_path: &String) -> Result<Process, ParseError> {
-        let pid = extract_pid_from_path(file_path)?;
-        let mut process = Process::new(pid);
-        let name = self.get_process_name(pid)?;
-        let cmdline = self.get_process_cmdline(pid)?;
-        let threads = self.get_threads_for_pid(pid)?;
-        let statuf_file_model = self.get_status_info(pid)?;
-
-        process.name = name;
-        process.cmdline = cmdline;
-        process.virtual_mem = statuf_file_model.virtual_mem;
-        process.physical_mem = statuf_file_model.physical_mem;
-        process.swap_mem = statuf_file_model.swap_mem;
-        process.thread_count = statuf_file_model.thread_count;
-
-        system_state.insert_process(process.clone());
-        threads
-            .into_iter()
-            .for_each(|thread| system_state.insert_thread(thread, pid));
-
-        Ok (process)
-    }
-
-    pub fn get_threads_for_pid(&self, pid: Pid) -> Result<Vec<Thread>, ParseError> {
-        let mut threads = vec![];
-        for entry in fs::read_dir(self.get_base_thread_path(pid)).unwrap() {
-            let thread_path = entry.unwrap().path();
-            if thread_path.is_dir() {
-                let thr_path_str = thread_path.display().to_string();
-                let tid = extract_tid_from_path(&thr_path_str)?;
-                threads.push(Thread::new(tid));
-            }
-        }
-
-        Ok(threads)
-    }
-
-    pub fn get_status_info(&self, pid: Pid) -> Result<StatusFileModel, ParseError> {
-        let file_path = format!("{BASE_PROC_PATH}/{pid}/status");
-        let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
-        let buf_reader = BufReader::new(file);
-        self.parse_status_info(buf_reader)
     }
 
     fn parse_status_info<R>(&self, reader: R) -> Result<StatusFileModel, ParseError>
@@ -121,23 +85,6 @@ impl ProcessParser {
         }
     }
 
-
-    pub fn get_process_name(&self, pid: Pid) -> Result<String, ParseError> {
-        let file_path = format!("{BASE_PROC_PATH}/{pid}/comm");
-        let buf = self.read_entire_file(&file_path)?;
-        let normalized = self.normalize_name(&buf);
-
-        Ok(normalized)
-    }
-
-    pub fn get_process_cmdline(&self, pid: Pid) -> Result<String, ParseError> {
-        let file_path = format!("{BASE_PROC_PATH}/{pid}/cmdline");
-        let buf = self.read_entire_file(&file_path)?;
-        let normalized = self.normalize_cmdline(&buf);
-
-        Ok(normalized)
-    }
-
     fn read_entire_file(&self, file_path: &String) -> Result<String, ParseError> {
         let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
         let mut buf_reader = BufReader::new(file);
@@ -158,7 +105,69 @@ impl ProcessParser {
         s.trim_end_matches("\n").into()
     }
 
-    pub fn get_base_thread_path(&self, pid: Pid) -> String {
+    fn get_base_thread_path(&self, pid: Pid) -> String {
         format!("{BASE_PROC_PATH}/{pid}/task")
+    }
+}
+
+impl TraitProcessParser for ProcessParser {
+    fn parse_process(&self, system_state: &mut SystemState, file_path: &String) -> Result<Process, ParseError> {
+        let pid = extract_pid_from_path(file_path)?;
+        let mut process = Process::new(pid);
+        let name = self.get_process_name(pid)?;
+        let cmdline = self.get_process_cmdline(pid)?;
+        let threads = self.get_threads_for_pid(pid)?;
+        let statuf_file_model = self.get_status_info(pid)?;
+
+        process.name = name;
+        process.cmdline = cmdline;
+        process.virtual_mem = statuf_file_model.virtual_mem;
+        process.physical_mem = statuf_file_model.physical_mem;
+        process.swap_mem = statuf_file_model.swap_mem;
+        process.thread_count = statuf_file_model.thread_count;
+
+        system_state.insert_process(process.clone());
+        threads
+            .into_iter()
+            .for_each(|thread| system_state.insert_thread(thread, pid));
+
+        Ok (process)
+    }
+
+    fn get_threads_for_pid(&self, pid: Pid) -> Result<Vec<Thread>, ParseError> {
+        let mut threads = vec![];
+        for entry in fs::read_dir(self.get_base_thread_path(pid)).unwrap() {
+            let thread_path = entry.unwrap().path();
+            if thread_path.is_dir() {
+                let thr_path_str = thread_path.display().to_string();
+                let tid = extract_tid_from_path(&thr_path_str)?;
+                threads.push(Thread::new(tid));
+            }
+        }
+
+        Ok(threads)
+    }
+
+    fn get_status_info(&self, pid: Pid) -> Result<StatusFileModel, ParseError> {
+        let file_path = format!("{BASE_PROC_PATH}/{pid}/status");
+        let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let buf_reader = BufReader::new(file);
+        self.parse_status_info(buf_reader)
+    }
+
+    fn get_process_name(&self, pid: Pid) -> Result<String, ParseError> {
+        let file_path = format!("{BASE_PROC_PATH}/{pid}/comm");
+        let buf = self.read_entire_file(&file_path)?;
+        let normalized = self.normalize_name(&buf);
+
+        Ok(normalized)
+    }
+
+    fn get_process_cmdline(&self, pid: Pid) -> Result<String, ParseError> {
+        let file_path = format!("{BASE_PROC_PATH}/{pid}/cmdline");
+        let buf = self.read_entire_file(&file_path)?;
+        let normalized = self.normalize_cmdline(&buf);
+
+        Ok(normalized)
     }
 }
