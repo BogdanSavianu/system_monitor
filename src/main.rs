@@ -17,4 +17,5 @@ fn main() {
     }
 
     println!("{:#?}", system_state);
+    println!("{:#?}", parser.get_status_info());
 }

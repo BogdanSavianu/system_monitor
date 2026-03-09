@@ -1,7 +1,7 @@
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read};
 
-use crate::model::StatusFileModel;
+use crate::model::ProcessStatusFileModel;
 use crate::process::Process;
 use crate::state::SystemState;
 use crate::thread::Thread;
@@ -12,7 +12,7 @@ const BASE_PROC_PATH: &str = "/proc";
 pub trait TraitProcessParser {
     fn parse_process(&self, system_state: &mut SystemState, file_path: &String) -> Result<Process, ParseError>;
     fn get_threads_for_pid(&self, pid: Pid) -> Result<Vec<Thread>, ParseError>;
-    fn get_status_info(&self, pid: Pid) -> Result<StatusFileModel, ParseError>;
+    fn get_status_info(&self, pid: Pid) -> Result<ProcessStatusFileModel, ParseError>;
     fn get_process_name(&self, pid: Pid) -> Result<String, ParseError>;
     fn get_process_cmdline(&self, pid: Pid) -> Result<String, ParseError>;
 }
@@ -24,7 +24,7 @@ impl ProcessParser {
         ProcessParser {}
     }
 
-    fn parse_status_info<R>(&self, reader: R) -> Result<StatusFileModel, ParseError>
+    fn parse_status_info<R>(&self, reader: R) -> Result<ProcessStatusFileModel, ParseError>
         where R: BufRead,
     {
         let mut vm_size: Option<Vm> = None;
@@ -78,7 +78,7 @@ impl ProcessParser {
 
         match (vm_size, pm_size, swap_size, thread_count) {
             (Some(vm), Some(pm), Some(swap), Some(th_count)) 
-                => Ok(StatusFileModel::new(vm, pm, swap, th_count)),
+                => Ok(ProcessStatusFileModel::new(vm, pm, swap, th_count)),
             _ => Err(ParseError::ParsingError(
                 "VmSize or VmRSS not found in status".into(),
             )),
@@ -148,7 +148,7 @@ impl TraitProcessParser for ProcessParser {
         Ok(threads)
     }
 
-    fn get_status_info(&self, pid: Pid) -> Result<StatusFileModel, ParseError> {
+    fn get_status_info(&self, pid: Pid) -> Result<ProcessStatusFileModel, ParseError> {
         let file_path = format!("{BASE_PROC_PATH}/{pid}/status");
         let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
         let buf_reader = BufReader::new(file);
