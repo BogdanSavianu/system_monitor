@@ -13,6 +13,8 @@ pub trait TraitProcessParser {
     fn parse_process(&self, system_state: &mut SystemState, file_path: &String) -> Result<Process, ParseError>;
     fn get_threads_for_pid(&self, pid: Pid) -> Result<Vec<Thread>, ParseError>;
     fn get_status_info(&self, pid: Pid) -> Result<ProcessStatusFileModel, ParseError>;
+    // for now it return utime and stime used for jiffies
+    fn get_stat_info(&self, pid: Pid) -> Result<(u64, u64), ParseError>;
     fn get_process_name(&self, pid: Pid) -> Result<String, ParseError>;
     fn get_process_cmdline(&self, pid: Pid) -> Result<String, ParseError>;
 }
@@ -41,21 +43,21 @@ impl ProcessParser {
             match (key, value) {
                 (Some("VmSize:"), Some(val)) => {
                     vm_size = Some(
-                        val.parse::<u32>()
+                        val.parse::<Vm>()
                             .map_err(|err| ParseError::ParsingError(err.to_string()))? as Vm
                     );
                 }
 
                 (Some("VmRSS:"), Some(val)) => {
                     pm_size = Some(
-                        val.parse::<u32>()
+                        val.parse::<Pm>()
                             .map_err(|err| ParseError::ParsingError(err.to_string()))? as Pm
                     );
                 }
 
                 (Some("VmSwap:"), Some(val)) => {
                     swap_size = Some(
-                        val.parse::<u32>()
+                        val.parse::<Swap>()
                             .map_err(|err| ParseError::ParsingError(err.to_string()))? as Swap
                     );
                 }
@@ -92,6 +94,55 @@ impl ProcessParser {
         let _ = buf_reader.read_to_string(&mut buf);
 
         Ok(buf)
+    }
+
+    fn parse_stat_info<R>(&self, mut buf_reader: R) -> Result<(u64, u64), ParseError> 
+        where R: BufRead,
+    {
+        let mut content = String::new();
+        let size_read = buf_reader
+            .read_to_string(&mut content)
+            .map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        if size_read == 0 {
+            return Err(ParseError::ParsingError("Stat file has 0 bytes".to_string()));
+        }
+
+        let content = content.trim();
+
+        // /proc/<pid>/stat format starts with: "pid (comm) state ..."
+        let comm_start = content
+            .find('(')
+            .ok_or_else(|| ParseError::ParsingError("Stat file has wrong format".to_string()))?;
+
+        // comm is unpredictable since it is the command line and can contain ')' itself
+        // that is why I use rfind to find its last appearance
+        let comm_end = content
+            .rfind(") ")
+            .ok_or_else(|| ParseError::ParsingError("Stat file has wrong format".to_string()))?;
+
+        if comm_end <= comm_start {
+            return Err(ParseError::ParsingError("Stat file has wrong format".to_string()));
+        }
+
+        // skip state and ppid
+        let after_comm = &content[(comm_end + 2)..];
+        let fields: Vec<&str> = after_comm.split_whitespace().collect();
+
+        // relative to field 3: field14(utime) => idx 11, field15(stime) => idx 12
+        if fields.len() <= 12 {
+            return Err(ParseError::ParsingError(
+                "Stat file has too few fields".to_string(),
+            ));
+        }
+
+        let utime = fields[11]
+            .parse::<u64>()
+            .map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let stime = fields[12]
+            .parse::<u64>()
+            .map_err(|err| ParseError::ParsingError(err.to_string()))?;
+
+        Ok((utime, stime))
     }
 
     fn normalize_cmdline(&self, s: &String) -> String {
@@ -153,6 +204,13 @@ impl TraitProcessParser for ProcessParser {
         let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
         let buf_reader = BufReader::new(file);
         self.parse_status_info(buf_reader)
+    }
+
+    fn get_stat_info(&self, pid: Pid) -> Result<(u64, u64), ParseError> {
+        let file_path = format!("{BASE_PROC_PATH}/{pid}/stat");
+        let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let buf_reader = BufReader::new(file);
+        self.parse_stat_info(buf_reader)
     }
 
     fn get_process_name(&self, pid: Pid) -> Result<String, ParseError> {

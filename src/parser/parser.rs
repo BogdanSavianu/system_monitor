@@ -69,7 +69,9 @@ impl<ProcParser: TraitProcessParser> Parser<ProcParser> {
             ParseError::ParsingError("missing aggregate cpu line in /proc/stat".to_string())
         })?;
 
-        Ok(SystemStatusFileModel::build(total_cpu, cpus))
+        let num_cores = cpus.len() as u8;
+
+        Ok(SystemStatusFileModel::build(total_cpu, cpus, num_cores))
     }
 
 

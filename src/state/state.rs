@@ -4,6 +4,7 @@ use crate::{hashmap, process::Process, thread::Thread, util::types::*};
 
 #[derive(Debug)]
 pub struct SystemState {
+    pub num_cores: u8,
     pub processes: HashMap<Pid, Process>,
     pub threads: HashMap<Tid, Thread>,
     pub threads_by_pid: HashMap<Pid, Vec<Tid>>,
@@ -12,6 +13,7 @@ pub struct SystemState {
 impl SystemState {
     pub fn new() -> Self {
         SystemState {
+            num_cores: 0,
             processes: hashmap![],
             threads: hashmap![],
             threads_by_pid: hashmap![],
