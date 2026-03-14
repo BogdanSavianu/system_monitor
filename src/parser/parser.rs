@@ -1,9 +1,11 @@
-use std::fs::File;
+use std::collections::HashMap;
+use std::fs::{File, read_dir};
 use std::io::{BufRead, BufReader};
 
+use crate::hashmap;
 use crate::process::Process;
 use crate::state::SystemState;
-use crate::util::parser_utils::*;
+use crate::util::{Pid, parser_utils::*};
 use crate::model::SystemStatusFileModel;
 
 pub use super::process_parser::*;
@@ -19,9 +21,89 @@ impl<ProcParser: TraitProcessParser> Parser<ProcParser> {
             process_parser,
         }
     }
+    
+    // this DOES NOT include jiffies
+    pub fn parse_all_processes(&self) -> Vec<Process> {
+        let mut processes: Vec<Process> = vec![];
+        if let Ok(entries) = read_dir("/proc") {
+            for entry in entries {
+                let Ok(entry) = entry else {
+                    continue;
+                };
 
-    pub fn parse_process(&self, system_state: &mut SystemState, file_path: &String) -> Result<Process, ParseError> {
-        self.process_parser.parse_process(system_state, file_path)
+                let process_path = entry.path();
+                if process_path.is_dir() {
+                    let process_path_string = process_path.display().to_string();
+                    if let Ok(process) = self.parse_process(&process_path_string) {
+                        processes.push(process);
+                    }
+                }
+            }
+        }
+
+        processes
+    }
+
+    // obviously this ONLY includes jiffies
+    pub fn parse_all_process_jiffies(&self) -> HashMap<Pid, u64> {
+        let mut jiffies: HashMap<Pid, u64> = hashmap![];
+        if let Ok(entries) = read_dir("/proc") {
+            for entry in entries {
+                let Ok(entry) = entry else {
+                    continue;
+                };
+
+                let process_path = entry.path();
+                if process_path.is_dir() {
+                    let process_path_string = process_path.display().to_string();
+                    let Some(pid_str) = process_path_string.split('/').last() else {
+                        continue;
+                    };
+
+                    let Ok(pid) = pid_str.parse::<u32>() else {
+                        continue;
+                    };
+
+                    if let Ok((utime, stime)) = self.process_parser.get_stat_info(pid) {
+                        jiffies.insert(pid, utime + stime);
+                    }
+                }
+            }
+        }
+
+        jiffies
+    }
+
+    pub fn parse_process(&self, file_path: &String) -> Result<Process, ParseError> {
+        self.process_parser.parse_process(file_path)
+    }
+
+    pub fn refresh_process_snapshot(&self, system_state: &mut SystemState) {
+        system_state.clear_process_snapshot();
+        let processes = self.parse_all_processes();
+
+        for process in processes {
+            let pid = process.pid;
+            system_state.insert_process(process);
+
+            if let Ok(threads) = self.process_parser.get_threads_for_pid(pid) {
+                for thread in threads {
+                    system_state.insert_thread(thread, pid);
+                }
+            }
+        }
+    }
+
+    pub fn initialize_cpu_sampling(&self, system_state: &mut SystemState) -> Result<u64, ParseError> {
+        self.refresh_process_snapshot(system_state);
+
+        let sys0 = self.get_status_info()?;
+        system_state.num_cores = sys0.num_cores;
+
+        let prev_jiffies = self.get_process_jiffies(system_state);
+        system_state.update_jiffies(prev_jiffies);
+
+        Ok(sys0.total_cpu)
     }
 
     pub fn get_status_info(&self) -> Result<SystemStatusFileModel, ParseError> {
@@ -29,6 +111,17 @@ impl<ProcParser: TraitProcessParser> Parser<ProcParser> {
         let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
         let buf_reader = BufReader::new(file);
         self.parse_status_info(buf_reader)
+    }
+
+    pub fn get_process_jiffies(&self, system_state: &SystemState) -> HashMap<Pid, u64> {
+        let mut jiffies: HashMap<Pid, u64> = hashmap![];
+        for p in system_state.processes.values() {
+            if let Ok((utime, stime)) = self.process_parser.get_stat_info(p.pid) {
+                jiffies.insert(p.pid, utime + stime);
+            }
+        }
+
+        jiffies
     }
 
     fn parse_status_info<R>(&self, reader: R) -> Result<SystemStatusFileModel, ParseError>

@@ -3,17 +3,16 @@ use std::io::{BufRead, BufReader, Read};
 
 use crate::model::ProcessStatusFileModel;
 use crate::process::Process;
-use crate::state::SystemState;
 use crate::thread::Thread;
 use crate::util::{types::*, parser_utils::*};
 
 const BASE_PROC_PATH: &str = "/proc";
 
 pub trait TraitProcessParser {
-    fn parse_process(&self, system_state: &mut SystemState, file_path: &String) -> Result<Process, ParseError>;
+    fn parse_process(&self, file_path: &String) -> Result<Process, ParseError>;
     fn get_threads_for_pid(&self, pid: Pid) -> Result<Vec<Thread>, ParseError>;
     fn get_status_info(&self, pid: Pid) -> Result<ProcessStatusFileModel, ParseError>;
-    // for now it return utime and stime used for jiffies
+    // for now it returns utime and stime used for jiffies
     fn get_stat_info(&self, pid: Pid) -> Result<(u64, u64), ParseError>;
     fn get_process_name(&self, pid: Pid) -> Result<String, ParseError>;
     fn get_process_cmdline(&self, pid: Pid) -> Result<String, ParseError>;
@@ -162,33 +161,35 @@ impl ProcessParser {
 }
 
 impl TraitProcessParser for ProcessParser {
-    fn parse_process(&self, system_state: &mut SystemState, file_path: &String) -> Result<Process, ParseError> {
+    fn parse_process(&self, file_path: &String) -> Result<Process, ParseError> {
         let pid = extract_pid_from_path(file_path)?;
         let mut process = Process::new(pid);
         let name = self.get_process_name(pid)?;
         let cmdline = self.get_process_cmdline(pid)?;
-        let threads = self.get_threads_for_pid(pid)?;
-        let statuf_file_model = self.get_status_info(pid)?;
+        let status_file_model = self.get_status_info(pid)?;
 
         process.name = name;
         process.cmdline = cmdline;
-        process.virtual_mem = statuf_file_model.virtual_mem;
-        process.physical_mem = statuf_file_model.physical_mem;
-        process.swap_mem = statuf_file_model.swap_mem;
-        process.thread_count = statuf_file_model.thread_count;
-
-        system_state.insert_process(process.clone());
-        threads
-            .into_iter()
-            .for_each(|thread| system_state.insert_thread(thread, pid));
+        process.virtual_mem = status_file_model.virtual_mem;
+        process.physical_mem = status_file_model.physical_mem;
+        process.swap_mem = status_file_model.swap_mem;
+        process.thread_count = status_file_model.thread_count;
 
         Ok (process)
     }
 
     fn get_threads_for_pid(&self, pid: Pid) -> Result<Vec<Thread>, ParseError> {
         let mut threads = vec![];
-        for entry in fs::read_dir(self.get_base_thread_path(pid)).unwrap() {
-            let thread_path = entry.unwrap().path();
+        let entries = fs::read_dir(self.get_base_thread_path(pid))
+            .map_err(|err| ParseError::ParsingError(err.to_string()))?;
+
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+
+            let thread_path = entry.path();
             if thread_path.is_dir() {
                 let thr_path_str = thread_path.display().to_string();
                 let tid = extract_tid_from_path(&thr_path_str)?;
