@@ -74,3 +74,64 @@ impl SystemState {
         usages
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::SystemState;
+
+    #[test]
+    fn calculate_cpu_usage_returns_empty_when_total_delta_is_zero() {
+        let state = SystemState::new();
+        let mut new_jiffies = HashMap::new();
+        new_jiffies.insert(1_u32, 120_u64);
+
+        let usage = state.calculate_cpu_usage(new_jiffies, 1000, 1000);
+        assert!(usage.is_empty());
+    }
+
+    #[test]
+    fn calculate_cpu_usage_computes_pct_for_existing_pid() {
+        let mut state = SystemState::new();
+        let mut prev_jiffies = HashMap::new();
+        prev_jiffies.insert(42_u32, 100_u64);
+        state.update_jiffies(prev_jiffies);
+
+        let mut new_jiffies = HashMap::new();
+        new_jiffies.insert(42_u32, 150_u64);
+        let usage = state.calculate_cpu_usage(new_jiffies, 1_000, 1_200);
+
+        let val = usage.get(&42_u32).copied().unwrap_or(-1.0);
+        // %CPU for this pid should be 25 so subtracting 25 leaves us with 0
+        assert!((val - 25.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn calculate_cpu_usage_sets_zero_for_new_pid() {
+        let mut state = SystemState::new();
+        let mut prev_jiffies = HashMap::new();
+        prev_jiffies.insert(1_u32, 10_u64);
+        state.update_jiffies(prev_jiffies);
+
+        let mut new_jiffies = HashMap::new();
+        new_jiffies.insert(2_u32, 77_u64);
+        let usage = state.calculate_cpu_usage(new_jiffies, 100, 200);
+
+        assert_eq!(usage.get(&2_u32).copied(), Some(0.0));
+    }
+
+    #[test]
+    fn calculate_cpu_usage_uses_saturating_sub_for_pid_delta() {
+        let mut state = SystemState::new();
+        let mut prev_jiffies = HashMap::new();
+        prev_jiffies.insert(9_u32, 100_u64);
+        state.update_jiffies(prev_jiffies);
+
+        let mut new_jiffies = HashMap::new();
+        new_jiffies.insert(9_u32, 90_u64);
+        let usage = state.calculate_cpu_usage(new_jiffies, 100, 200);
+
+        assert_eq!(usage.get(&9_u32).copied(), Some(0.0));
+    }
+}
