@@ -1,10 +1,78 @@
-use std::{thread::sleep, time::Duration};
+use std::{env, thread::sleep, time::Duration};
 
-use system_monitor::{monitor::Monitor, parser::ProcessParser, util::ParseError};
+use system_monitor::{monitor::Monitor, parser::{ProcessParser, ThreadParser}, util::ParseError};
+
+fn parse_args() -> Result<(bool, Option<u32>), ParseError> {
+    let mut show_threads = false;
+    let mut pid_filter: Option<u32> = None;
+
+    for arg in env::args().skip(1) {
+        if arg == "-threads" || arg == "--threads" {
+            show_threads = true;
+            continue;
+        }
+
+        if let Some(pid_str) = arg.strip_prefix("-pid=").or_else(|| arg.strip_prefix("--pid=")) {
+            let pid = pid_str
+                .parse::<u32>()
+                .map_err(|err| ParseError::ParsingError(format!("invalid pid '{}': {}", pid_str, err)))?;
+            pid_filter = Some(pid);
+            continue;
+        }
+
+        return Err(ParseError::ParsingError(format!(
+            "unknown argument '{}'. supported: -threads, -pid=<pid>",
+            arg
+        )));
+    }
+
+    Ok((show_threads, pid_filter))
+}
+
+fn print_samples(
+    monitor: &mut Monitor<ProcessParser, ThreadParser>,
+    show_threads: bool,
+    pid_filter: Option<u32>,
+) -> Result<(), ParseError> {
+    if show_threads {
+        let cpu_samples = monitor.sample_thread_cpu_usage()?;
+
+        for sample in cpu_samples
+            .iter()
+            .filter(|sample| pid_filter.is_none_or(|pid| sample.pid == pid))
+        {
+            println!(
+                "pid={} tid={} process_name={} cpu_norm={:.2}% cpu_top={:.2}%",
+                sample.pid,
+                sample.tid,
+                sample.process_name,
+                sample.cpu_norm,
+                sample.cpu_top
+            );
+        }
+    } else {
+        let cpu_samples = monitor.sample_cpu_usage()?;
+
+        for sample in cpu_samples
+            .iter()
+            .filter(|sample| pid_filter.is_none_or(|pid| sample.pid == pid))
+        {
+            println!(
+                "pid={} name={} cpu_norm={:.2}% cpu_top={:.2}%",
+                sample.pid, sample.name, sample.cpu_norm, sample.cpu_top
+            );
+        }
+    }
+
+    Ok(())
+}
 
 fn main() -> Result<(), ParseError>{
+    let (show_threads, pid_filter) = parse_args()?;
+
     let process_parser = ProcessParser::new();
-    let mut monitor = Monitor::with_parser(process_parser);
+    let thread_parser = ThreadParser::new();
+    let mut monitor = Monitor::with_parsers(process_parser, thread_parser);
 
     // t0
     monitor.initialize_sampling()?;
@@ -12,14 +80,7 @@ fn main() -> Result<(), ParseError>{
     sleep(Duration::from_millis(2000));
 
     // t1
-    let cpu_samples = monitor.sample_cpu_usage()?;
-
-    for sample in cpu_samples.iter() {
-        println!(
-            "pid={} name={} cpu_norm={:.2}% cpu_top={:.2}%",
-            sample.pid, sample.name, sample.cpu_norm, sample.cpu_top
-        );
-    }
+    print_samples(&mut monitor, show_threads, pid_filter)?;
 
     //println!("{:#?}", system_state);
     //println!("{:#?}", parser.get_status_info());

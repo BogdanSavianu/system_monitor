@@ -5,20 +5,23 @@ use std::io::{BufRead, BufReader};
 use crate::hashmap;
 use crate::process::Process;
 use crate::state::SystemState;
-use crate::util::{Pid, parser_utils::*};
+use crate::util::{Pid, Tid, parser_utils::*};
 use crate::model::SystemStatusFileModel;
 
 pub use super::process_parser::*;
+pub use super::thread_parser::*;
 
-pub struct Parser<ProcParser: TraitProcessParser> {
-    pub process_parser: ProcParser
+pub struct Parser<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> {
+    pub process_parser: ProcParser,
+    pub thread_parser: ThrParser,
 }
 
 
-impl<ProcParser: TraitProcessParser> Parser<ProcParser> {
-    pub fn new(process_parser: ProcParser) -> Self {
+impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Parser<ProcParser, ThrParser> {
+    pub fn new(process_parser: ProcParser, thread_parser: ThrParser) -> Self {
         Parser { 
             process_parser,
+            thread_parser,
         }
     }
     
@@ -103,6 +106,9 @@ impl<ProcParser: TraitProcessParser> Parser<ProcParser> {
         let prev_jiffies = self.get_process_jiffies(system_state);
         system_state.update_jiffies(prev_jiffies);
 
+        let prev_thread_jiffies = self.get_thread_jiffies(system_state);
+        system_state.update_thread_jiffies(prev_thread_jiffies);
+
         Ok(sys0.total_cpu)
     }
 
@@ -118,6 +124,20 @@ impl<ProcParser: TraitProcessParser> Parser<ProcParser> {
         for p in system_state.processes.values() {
             if let Ok((utime, stime)) = self.process_parser.get_stat_info(p.pid) {
                 jiffies.insert(p.pid, utime + stime);
+            }
+        }
+
+        jiffies
+    }
+
+    pub fn get_thread_jiffies(&self, system_state: &SystemState) -> HashMap<Tid, u64> {
+        let mut jiffies: HashMap<Tid, u64> = hashmap![];
+
+        for (pid, tids) in system_state.threads_by_pid.iter() {
+            for tid in tids {
+                if let Ok((utime, stime)) = self.thread_parser.get_thread_stat_info(*pid, *tid) {
+                    jiffies.insert(*tid, utime + stime);
+                }
             }
         }
 
@@ -191,7 +211,7 @@ mod tests {
 
     use crate::{
         model::ProcessStatusFileModel,
-        parser::process_parser::TraitProcessParser,
+        parser::{process_parser::TraitProcessParser, thread_parser::TraitThreadParser},
         process::Process,
         thread::Thread,
         util::{parser_utils::ParseError, types::Pid},
@@ -200,6 +220,7 @@ mod tests {
     use super::Parser;
 
     struct DummyProcessParser;
+    struct DummyThreadParser;
 
     impl TraitProcessParser for DummyProcessParser {
         fn parse_process(&self, _file_path: &String) -> Result<Process, ParseError> {
@@ -227,9 +248,15 @@ mod tests {
         }
     }
 
+    impl TraitThreadParser for DummyThreadParser {
+        fn get_thread_stat_info(&self, _pid: Pid, _tid: crate::util::Tid) -> Result<(u64, u64), ParseError> {
+            Err(ParseError::ParsingError("not used in this test".to_string()))
+        }
+    }
+
     #[test]
     fn parse_status_info_extracts_total_and_per_core_jiffies() {
-        let parser = Parser::new(DummyProcessParser);
+        let parser = Parser::new(DummyProcessParser, DummyThreadParser);
         let input = "cpu  10 20 30 40 50 60 70 80 90 100\n\
 cpu0 1 2 3 4 5 6 7 8 9 10\n\
 cpu1 2 3 4 5 6 7 8 9 10 11\n\
@@ -246,7 +273,7 @@ intr 123\n";
 
     #[test]
     fn parse_status_info_fails_without_aggregate_cpu_line() {
-        let parser = Parser::new(DummyProcessParser);
+        let parser = Parser::new(DummyProcessParser, DummyThreadParser);
         let input = "cpu0 1 2 3 4 5 6 7 8\n";
 
         let result = parser.parse_status_info(Cursor::new(input));
@@ -255,7 +282,7 @@ intr 123\n";
 
     #[test]
     fn sum_cpu_jiffies_requires_minimum_fields() {
-        let parser = Parser::new(DummyProcessParser);
+        let parser = Parser::new(DummyProcessParser, DummyThreadParser);
         let result = parser.sum_cpu_jiffies(&["1", "2", "3"]);
 
         assert!(result.is_err());

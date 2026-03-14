@@ -9,6 +9,7 @@ pub struct SystemState {
     pub threads: HashMap<Tid, Thread>,
     pub threads_by_pid: HashMap<Pid, Vec<Tid>>,
     pub process_jiffies: HashMap<Pid, u64>,
+    pub thread_jiffies: HashMap<Tid, u64>,
 }
 
 impl SystemState {
@@ -19,6 +20,7 @@ impl SystemState {
             threads: hashmap![],
             threads_by_pid: hashmap![],
             process_jiffies: hashmap![],
+            thread_jiffies: hashmap![],
         }
     }
 
@@ -44,6 +46,10 @@ impl SystemState {
         self.process_jiffies = new_jiffies;
     }
 
+    pub fn update_thread_jiffies(&mut self, new_jiffies: HashMap<Tid, u64>) {
+        self.thread_jiffies = new_jiffies;
+    }
+
     pub fn clear_process_snapshot(&mut self) {
         self.processes.clear();
         self.threads.clear();
@@ -52,6 +58,10 @@ impl SystemState {
 
     pub fn add_jiffies_for_pid(&mut self, pid: Pid, jiffies: u64) {
         self.process_jiffies.insert(pid, jiffies);
+    }
+
+    pub fn add_jiffies_for_tid(&mut self, tid: Tid, jiffies: u64) {
+        self.thread_jiffies.insert(tid, jiffies);
     }
 
     pub fn calculate_cpu_usage(&self, new_jiffies: HashMap<Pid, u64>, total0: u64, total1: u64) -> HashMap<Pid, f64> {
@@ -68,6 +78,26 @@ impl SystemState {
                 usages.insert(*pid, pct_norm);
             } else {
                 usages.insert(*pid, 0 as f64);
+            }
+        }
+
+        usages
+    }
+
+    pub fn calculate_thread_cpu_usage(&self, new_jiffies: HashMap<Tid, u64>, total0: u64, total1: u64) -> HashMap<Tid, f64> {
+        let d_total = total1.saturating_sub(total0);
+        if d_total == 0 {
+            return hashmap![];
+        }
+
+        let mut usages: HashMap<Tid, f64> = hashmap![];
+        for (tid, jiffie) in new_jiffies.iter() {
+            if let Some(prev_jiffie) = self.thread_jiffies.get(tid) {
+                let d_thr = jiffie.saturating_sub(*prev_jiffie);
+                let pct_norm = 100.0 * (d_thr as f64) / (d_total as f64);
+                usages.insert(*tid, pct_norm);
+            } else {
+                usages.insert(*tid, 0 as f64);
             }
         }
 
