@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    parser::{Parser, ProcessParser},
-    state::SystemState,
-    util::{ParseError, Pid},
+    dto::ProcessCpuSampleDTO, parser::{Parser, ProcessParser}, state::SystemState, util::{ParseError, Pid}
 };
 
 pub struct Monitor {
@@ -28,7 +26,7 @@ impl Monitor {
         Ok(())
     }
 
-    pub fn sample_cpu_usage(&mut self) -> Result<HashMap<Pid, f64>, ParseError> {
+    pub fn sample_cpu_usage_map(&mut self) -> Result<HashMap<Pid, f64>, ParseError> {
         let total0 = self.previous_total_cpu.ok_or_else(|| {
             ParseError::ParsingError("monitor sampling is not initialized".to_string())
         })?;
@@ -45,6 +43,30 @@ impl Monitor {
         self.previous_total_cpu = Some(total1);
 
         Ok(cpu_usage)
+    }
+
+    // adapter method that turns the HashMap into a more serializable Vec
+    pub fn sample_cpu_usage(&mut self) -> Result<Vec<ProcessCpuSampleDTO>, ParseError> {
+        let usage_map = self.sample_cpu_usage_map()?;
+        let num_cores = self.system_state.num_cores as f64;
+
+        let mut samples: Vec<ProcessCpuSampleDTO> = usage_map
+            .into_iter()
+            .filter_map(|(pid, cpu_norm)| {
+                self.system_state.get_process(pid).map(|proc_| {
+                    ProcessCpuSampleDTO::new(
+                        pid,
+                        proc_.name.clone(),
+                        cpu_norm,
+                        cpu_norm * num_cores,
+                    )
+                })
+            })
+            .collect();
+
+        samples.sort_by(|a, b| b.cpu_top.total_cmp(&a.cpu_top));
+
+        Ok(samples)
     }
 
     pub fn state(&self) -> &SystemState {

@@ -4,5 +4,6 @@ pub mod thread;
 pub mod parser;
 pub mod monitor;
 pub mod model;
+pub mod dto;
 pub mod collections;
 pub mod util;

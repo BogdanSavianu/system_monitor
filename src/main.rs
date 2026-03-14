@@ -11,16 +11,13 @@ fn main() -> Result<(), ParseError>{
     sleep(Duration::from_millis(2000));
 
     // t1
-    let proc_jiffies = monitor.sample_cpu_usage()?;
-    let system_state = monitor.state();
+    let cpu_samples = monitor.sample_cpu_usage()?;
 
-    for (pid, usage) in proc_jiffies.iter() {
-        if let Some(proc) = system_state.processes.get(pid) {
-            println!(
-                "pid={} name={} cpu_usage={:.2}%",
-                proc.pid, proc.name, usage
-            );
-        }
+    for sample in cpu_samples.iter() {
+        println!(
+            "pid={} name={} cpu_norm={:.2}% cpu_top={:.2}%",
+            sample.pid, sample.name, sample.cpu_norm, sample.cpu_top
+        );
     }
 
     //println!("{:#?}", system_state);
