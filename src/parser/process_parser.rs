@@ -230,3 +230,73 @@ impl TraitProcessParser for ProcessParser {
         Ok(normalized)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::ProcessParser;
+
+    #[test]
+    fn parse_status_info_extracts_expected_fields() {
+        let parser = ProcessParser::new();
+        let input = "Name:\ttest\nVmSize:\t1000 kB\nVmRSS:\t512 kB\nVmSwap:\t8 kB\nThreads:\t4\n";
+
+        let model = parser
+            .parse_status_info(Cursor::new(input))
+            .expect("status info should parse");
+
+        assert_eq!(model.virtual_mem, 1000);
+        assert_eq!(model.physical_mem, 512);
+        assert_eq!(model.swap_mem, 8);
+        assert_eq!(model.thread_count, 4);
+    }
+
+    #[test]
+    fn parse_status_info_fails_when_required_field_missing() {
+        let parser = ProcessParser::new();
+        let input = "VmSize:\t1000 kB\nVmRSS:\t512 kB\nThreads:\t4\n";
+
+        let result = parser.parse_status_info(Cursor::new(input));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_stat_info_reads_utime_and_stime() {
+        let parser = ProcessParser::new();
+        // fields after ") " begin at field 3 (state); utime/stime are relative indices 11 and 12.
+        let input = "1234 (my process) R 1 2 3 4 5 6 7 8 9 10 11 42 84 15 16";
+
+        let (utime, stime) = parser
+            .parse_stat_info(Cursor::new(input))
+            .expect("stat info should parse");
+
+        assert_eq!(utime, 11);
+        assert_eq!(stime, 42);
+    }
+
+    #[test]
+    fn parse_stat_info_fails_on_empty_content() {
+        let parser = ProcessParser::new();
+        let result = parser.parse_stat_info(Cursor::new(""));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn normalize_cmdline_replaces_nul_with_spaces() {
+        let parser = ProcessParser::new();
+        let input = String::from("python\0script.py\0--flag\0");
+        let normalized = parser.normalize_cmdline(&input);
+
+        assert_eq!(normalized, "python script.py --flag");
+    }
+
+    #[test]
+    fn normalize_name_trims_trailing_newline() {
+        let parser = ProcessParser::new();
+        let input = String::from("bash\n");
+        let normalized = parser.normalize_name(&input);
+
+        assert_eq!(normalized, "bash");
+    }
+}

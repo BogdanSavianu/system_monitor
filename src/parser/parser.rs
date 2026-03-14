@@ -184,3 +184,80 @@ impl<ProcParser: TraitProcessParser> Parser<ProcParser> {
     }
 
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use crate::{
+        model::ProcessStatusFileModel,
+        parser::process_parser::TraitProcessParser,
+        process::Process,
+        thread::Thread,
+        util::{parser_utils::ParseError, types::Pid},
+    };
+
+    use super::Parser;
+
+    struct DummyProcessParser;
+
+    impl TraitProcessParser for DummyProcessParser {
+        fn parse_process(&self, _file_path: &String) -> Result<Process, ParseError> {
+            Ok(Process::new(0))
+        }
+
+        fn get_threads_for_pid(&self, _pid: Pid) -> Result<Vec<Thread>, ParseError> {
+            Ok(vec![])
+        }
+
+        fn get_status_info(&self, _pid: Pid) -> Result<ProcessStatusFileModel, ParseError> {
+            Err(ParseError::ParsingError("not used in this test".to_string()))
+        }
+
+        fn get_stat_info(&self, _pid: Pid) -> Result<(u64, u64), ParseError> {
+            Err(ParseError::ParsingError("not used in this test".to_string()))
+        }
+
+        fn get_process_name(&self, _pid: Pid) -> Result<String, ParseError> {
+            Err(ParseError::ParsingError("not used in this test".to_string()))
+        }
+
+        fn get_process_cmdline(&self, _pid: Pid) -> Result<String, ParseError> {
+            Err(ParseError::ParsingError("not used in this test".to_string()))
+        }
+    }
+
+    #[test]
+    fn parse_status_info_extracts_total_and_per_core_jiffies() {
+        let parser = Parser::new(DummyProcessParser);
+        let input = "cpu  10 20 30 40 50 60 70 80 90 100\n\
+cpu0 1 2 3 4 5 6 7 8 9 10\n\
+cpu1 2 3 4 5 6 7 8 9 10 11\n\
+intr 123\n";
+
+        let status = parser
+            .parse_status_info(Cursor::new(input))
+            .expect("status should parse");
+
+        assert_eq!(status.total_cpu, 360);
+        assert_eq!(status.cpus, vec![36, 44]);
+        assert_eq!(status.num_cores, 2);
+    }
+
+    #[test]
+    fn parse_status_info_fails_without_aggregate_cpu_line() {
+        let parser = Parser::new(DummyProcessParser);
+        let input = "cpu0 1 2 3 4 5 6 7 8\n";
+
+        let result = parser.parse_status_info(Cursor::new(input));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn sum_cpu_jiffies_requires_minimum_fields() {
+        let parser = Parser::new(DummyProcessParser);
+        let result = parser.sum_cpu_jiffies(&["1", "2", "3"]);
+
+        assert!(result.is_err());
+    }
+}
