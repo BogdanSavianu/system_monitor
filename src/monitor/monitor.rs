@@ -101,25 +101,42 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Monitor<ProcP
         let usage_map = self.sample_thread_cpu_usage_map()?;
         let num_cores = self.system_state.num_cores as f64;
 
+        let mut tid_to_pid: HashMap<Tid, Pid> = HashMap::new();
+        for (pid, tids) in self.system_state.threads_by_pid.iter() {
+            for tid in tids {
+                tid_to_pid.insert(*tid, *pid);
+            }
+        }
+
         let mut samples: Vec<ThreadCpuSampleDTO> = usage_map
             .into_iter()
             .filter_map(|(tid, cpu_norm)| {
-                self.system_state.threads_by_pid.iter().find_map(|(pid, tids)| {
-                    if tids.contains(&tid) {
-                        self.system_state.get_process(*pid).map(|proc_| {
-                            ThreadCpuSampleDTO::new(
-                                *pid,
-                                tid,
-                                proc_.name.clone(),
-                                cpu_norm,
-                                cpu_norm * num_cores,
-                            )
-                        })
-                    } else {
-                        None
-                    }
+                let pid = tid_to_pid.get(&tid)?;
+                let process = self.system_state.get_process(*pid)?;
+                let thread = self.system_state.threads.get(&tid)?;
+
+                let mut dto = ThreadCpuSampleDTO::new(
+                    *pid,
+                    tid,
+                    process.name.clone(),
+                    thread.name.clone(),
+                    cpu_norm,
+                    cpu_norm * num_cores,
+                );
+
+                dto.state = thread.state;
+                dto.last_cpu = thread.last_cpu;
+                dto.voluntary_ctxt_switches = thread.voluntary_ctxt_switches;
+                dto.nonvoluntary_ctxt_switches = thread.nonvoluntary_ctxt_switches;
+                dto.io_read_bytes = thread.io_read_bytes;
+                dto.io_write_bytes = thread.io_write_bytes;
+                dto.io_rchar = thread.io_rchar;
+                dto.io_wchar = thread.io_wchar;
+                dto.io_syscr = thread.io_syscr;
+                dto.io_syscw = thread.io_syscw;
+
+                Some(dto)
                 })
-            })
             .collect();
 
         samples.sort_by(|a, b| b.cpu_top.total_cmp(&a.cpu_top));

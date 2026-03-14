@@ -42,12 +42,23 @@ fn print_samples(
             .filter(|sample| pid_filter.is_none_or(|pid| sample.pid == pid))
         {
             println!(
-                "pid={} tid={} process_name={} cpu_norm={:.2}% cpu_top={:.2}%",
+                "pid={} tid={} process_name={} thread_name={} cpu_norm={:.2}% cpu_top={:.2}% state={:?} last_cpu={:?} ctxsw_v={:?} ctxsw_nv={:?} io_read_bytes={:?} io_write_bytes={:?} io_rchar={:?} io_wchar={:?} io_syscr={:?} io_syscw={:?}",
                 sample.pid,
                 sample.tid,
                 sample.process_name,
+                sample.thread_name,
                 sample.cpu_norm,
-                sample.cpu_top
+                sample.cpu_top,
+                sample.state,
+                sample.last_cpu,
+                sample.voluntary_ctxt_switches,
+                sample.nonvoluntary_ctxt_switches,
+                sample.io_read_bytes,
+                sample.io_write_bytes,
+                sample.io_rchar,
+                sample.io_wchar,
+                sample.io_syscr,
+                sample.io_syscw
             );
         }
     } else {

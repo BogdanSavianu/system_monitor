@@ -91,7 +91,8 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Parser<ProcPa
 
             if let Ok(threads) = self.process_parser.get_threads_for_pid(pid) {
                 for thread in threads {
-                    system_state.insert_thread(thread, pid);
+                    let parsed_thread = self.thread_parser.parse_thread(pid, thread);
+                    system_state.insert_thread(parsed_thread, pid);
                 }
             }
         }
@@ -251,6 +252,10 @@ mod tests {
     impl TraitThreadParser for DummyThreadParser {
         fn get_thread_stat_info(&self, _pid: Pid, _tid: crate::util::Tid) -> Result<(u64, u64), ParseError> {
             Err(ParseError::ParsingError("not used in this test".to_string()))
+        }
+
+        fn parse_thread(&self, _pid: Pid, thread: Thread) -> Thread {
+            thread
         }
     }
 
