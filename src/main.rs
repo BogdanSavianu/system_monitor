@@ -1,9 +1,10 @@
 use std::{thread::sleep, time::Duration};
 
-use system_monitor::{monitor::Monitor, util::ParseError};
+use system_monitor::{monitor::Monitor, parser::ProcessParser, util::ParseError};
 
 fn main() -> Result<(), ParseError>{
-    let mut monitor = Monitor::new();
+    let process_parser = ProcessParser::new();
+    let mut monitor = Monitor::with_parser(process_parser);
 
     // t0
     monitor.initialize_sampling()?;

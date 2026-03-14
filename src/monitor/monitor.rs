@@ -1,19 +1,32 @@
 use std::collections::HashMap;
 
 use crate::{
-    dto::ProcessCpuSampleDTO, parser::{Parser, ProcessParser}, state::SystemState, util::{ParseError, Pid}
+    dto::ProcessCpuSampleDTO,
+    parser::{parser::TraitProcessParser, Parser, ProcessParser},
+    state::SystemState,
+    util::{ParseError, Pid},
 };
 
-pub struct Monitor {
-    parser: Parser<ProcessParser>,
+pub struct Monitor<ProcParser: TraitProcessParser> {
+    parser: Parser<ProcParser>,
     system_state: SystemState,
     previous_total_cpu: Option<u64>,
 }
 
-impl Monitor {
+impl Monitor<ProcessParser> {
     pub fn new() -> Self {
         Monitor {
             parser: Parser::new(ProcessParser::new()),
+            system_state: SystemState::new(),
+            previous_total_cpu: None,
+        }
+    }
+}
+
+impl<ProcParser: TraitProcessParser> Monitor<ProcParser> {
+    pub fn with_parser(process_parser: ProcParser) -> Self {
+        Monitor {
+            parser: Parser::new(process_parser),
             system_state: SystemState::new(),
             previous_total_cpu: None,
         }
