@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 
+use crate::model::ThreadStatInfoModel;
 use crate::thread::Thread;
 use crate::util::{parser_utils::*, types::*};
 
@@ -13,20 +14,12 @@ pub trait TraitThreadParser {
 
 pub struct ThreadParser;
 
-#[derive(Debug, Clone)]
-struct ThreadStatInfo {
-    utime: u64,
-    stime: u64,
-    state: Option<char>,
-    last_cpu: Option<u32>,
-}
-
 impl ThreadParser {
     pub fn new() -> Self {
         ThreadParser {}
     }
 
-    fn parse_stat_info<R>(&self, mut buf_reader: R) -> Result<ThreadStatInfo, ParseError>
+    fn parse_stat_info<R>(&self, mut buf_reader: R) -> Result<ThreadStatInfoModel, ParseError>
     where
         R: BufRead,
     {
@@ -70,7 +63,7 @@ impl ThreadParser {
 
         let last_cpu = fields.get(36).and_then(|value| value.parse::<u32>().ok());
 
-        Ok(ThreadStatInfo {
+        Ok(ThreadStatInfoModel {
             utime,
             stime,
             state,
