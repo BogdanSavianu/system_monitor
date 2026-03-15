@@ -1,6 +1,32 @@
 use std::{env, thread::sleep, time::Duration};
 
-use system_monitor::{monitor::Monitor, parser::{ProcessParser, ThreadParser}, util::ParseError};
+use system_monitor::{
+    monitor::Monitor,
+    parser::{network_parser::TraitNetworkParser, NetworkParser, ProcessParser, ThreadParser},
+    util::ParseError,
+};
+
+fn print_network() -> Result<(), ParseError> {
+    let parser = NetworkParser::new();
+    let sockets = parser.get_all_net_socket_info()?;
+
+    println!("network_test: parsed {} sockets", sockets.len());
+
+    for socket in sockets.iter().take(5) {
+        println!(
+            "proto={:?} inode={} {}:{} -> {}:{} state={:?}",
+            socket.protocol,
+            socket.inode,
+            socket.local_addr,
+            socket.local_port,
+            socket.remote_addr,
+            socket.remote_port,
+            socket.tcp_state
+        );
+    }
+
+    Ok(())
+}
 
 fn parse_args() -> Result<(bool, Option<u32>), ParseError> {
     let mut show_threads = false;
@@ -80,6 +106,8 @@ fn print_samples(
 
 fn main() -> Result<(), ParseError>{
     let (show_threads, pid_filter) = parse_args()?;
+
+    print_network()?;
 
     let process_parser = ProcessParser::new();
     let thread_parser = ThreadParser::new();
