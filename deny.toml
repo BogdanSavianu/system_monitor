@@ -1,0 +1,6 @@
+[licenses]
+# cargo deny fails unless allowed licenses are explicitly stated
+allow = [
+    "MIT",
+    "Apache-2.0",
+]
