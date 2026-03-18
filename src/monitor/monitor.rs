@@ -58,35 +58,40 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Monitor<ProcP
         let new_jiffies = self.parser.get_process_jiffies(&self.system_state);
         let new_thread_jiffies = self.parser.get_thread_jiffies(&self.system_state);
         let total1 = self.parser.get_status_info()?.total_cpu;
-
         let process_cpu_usage = self
             .system_state
-            .calculate_cpu_usage(new_jiffies.clone(), total0, total1);
+            .calculate_cpu_usage(&new_jiffies, total0, total1);
         let thread_cpu_usage = self
             .system_state
-            .calculate_thread_cpu_usage(new_thread_jiffies.clone(), total0, total1);
+            .calculate_thread_cpu_usage(&new_thread_jiffies, total0, total1);
 
         self.system_state.update_jiffies(new_jiffies);
         self.system_state.update_thread_jiffies(new_thread_jiffies);
+        self.system_state.total_proc_cpu_percentage = process_cpu_usage.total_proc_cpu_usage;
         self.previous_total_cpu = Some(total1);
 
-        Ok((process_cpu_usage, thread_cpu_usage))
+        Ok((process_cpu_usage.usages_norm, thread_cpu_usage))
     }
 
     // adapter method that turns the HashMap into a more serializable Vec
     pub fn sample_cpu_usage(&mut self) -> Result<Vec<ProcessCpuSampleDTO>, ParseError> {
         let usage_map = self.sample_cpu_usage_map()?;
         let num_cores = self.system_state.num_cores as f64;
+        let usage_relative = self
+            .system_state
+            .calculate_relative_cpu_usage(&usage_map, self.system_state.total_proc_cpu_percentage);
 
         let mut samples: Vec<ProcessCpuSampleDTO> = usage_map
             .into_iter()
             .filter_map(|(pid, cpu_norm)| {
                 self.system_state.get_process(pid).map(|proc_| {
-                    ProcessCpuSampleDTO::new(
+                    let cpu_rel = usage_relative.get(&pid).copied().unwrap_or(0.0);
+                    ProcessCpuSampleDTO::with_values(
                         pid,
                         proc_.name.clone(),
                         cpu_norm,
                         cpu_norm * num_cores,
+                        cpu_rel,
                     )
                 })
             })

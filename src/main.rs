@@ -95,8 +95,8 @@ fn print_samples(
             .filter(|sample| pid_filter.is_none_or(|pid| sample.pid == pid))
         {
             println!(
-                "pid={} name={} cpu_norm={:.2}% cpu_top={:.2}%",
-                sample.pid, sample.name, sample.cpu_norm, sample.cpu_top
+                "pid={} name={} cpu_norm={:.2}% cpu_top={:.2}% cpu_rel={:.2}%",
+                sample.pid, sample.name, sample.cpu_norm, sample.cpu_top, sample.cpu_rel
             );
         }
     }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{hashmap, process::Process, thread::Thread, util::types::*};
+use crate::{hashmap, model::CpuUsageResultModel, process::Process, thread::Thread, util::types::*};
 
 #[derive(Debug)]
 pub struct SystemState {
@@ -9,6 +9,7 @@ pub struct SystemState {
     pub threads: HashMap<Tid, Thread>,
     pub threads_by_pid: HashMap<Pid, Vec<Tid>>,
     pub process_jiffies: HashMap<Pid, u64>,
+    pub total_proc_cpu_percentage: f64,
     pub thread_jiffies: HashMap<Tid, u64>,
 }
 
@@ -20,6 +21,7 @@ impl SystemState {
             threads: hashmap![],
             threads_by_pid: hashmap![],
             process_jiffies: hashmap![],
+            total_proc_cpu_percentage: 0_f64,
             thread_jiffies: hashmap![],
         }
     }
@@ -64,27 +66,53 @@ impl SystemState {
         self.thread_jiffies.insert(tid, jiffies);
     }
 
-    pub fn calculate_cpu_usage(&self, new_jiffies: HashMap<Pid, u64>, total0: u64, total1: u64) -> HashMap<Pid, f64> {
+    pub fn calculate_cpu_usage(&self, new_jiffies: &HashMap<Pid, u64>, total0: u64, total1: u64) -> CpuUsageResultModel {
         let d_total = total1.saturating_sub(total0);
         if d_total == 0 {
-            return hashmap![];
+            return CpuUsageResultModel::new();
         }
 
         let mut usages: HashMap<Pid, f64> = hashmap![];
+        let mut total_proc_cpu_usage = 0_f64;
         for (pid, jiffie) in new_jiffies.iter() {
             if let Some(prev_jiffie) = self.process_jiffies.get(pid) {
                 let d_proc = jiffie.saturating_sub(*prev_jiffie);
                 let pct_norm = 100.0 * (d_proc as f64) / (d_total as f64);
                 usages.insert(*pid, pct_norm);
+                total_proc_cpu_usage += pct_norm;
             } else {
                 usages.insert(*pid, 0 as f64);
             }
         }
 
-        usages
+        CpuUsageResultModel::with_values(usages, total_proc_cpu_usage)
     }
 
-    pub fn calculate_thread_cpu_usage(&self, new_jiffies: HashMap<Tid, u64>, total0: u64, total1: u64) -> HashMap<Tid, f64> {
+    pub fn calculate_relative_cpu_usage(
+        &self,
+        usages_norm: &HashMap<Pid, f64>,
+        total_proc_cpu_percentage: f64,
+    ) -> HashMap<Pid, f64> {
+        let mut relative: HashMap<Pid, f64> = hashmap![];
+        // f64::EPSILON would have been impractically small
+        let epsilon = 1e-9;
+
+        if total_proc_cpu_percentage <= epsilon {
+            for pid in usages_norm.keys() {
+                relative.insert(*pid, 0.0);
+            }
+            return relative;
+        }
+
+        let scale = 100.0 / total_proc_cpu_percentage;
+        for (pid, cpu_norm) in usages_norm.iter() {
+            relative.insert(*pid, cpu_norm.max(0.0) * scale);
+        }
+
+        relative
+    }
+
+    pub fn calculate_thread_cpu_usage(&self, new_jiffies: &HashMap<Tid, u64>, total0: u64, total1: u64) -> HashMap<Tid, f64> {
         let d_total = total1.saturating_sub(total0);
         if d_total == 0 {
             return hashmap![];
@@ -117,8 +145,8 @@ mod tests {
         let mut new_jiffies = HashMap::new();
         new_jiffies.insert(1_u32, 120_u64);
 
-        let usage = state.calculate_cpu_usage(new_jiffies, 1000, 1000);
-        assert!(usage.is_empty());
+        let usage = state.calculate_cpu_usage(&new_jiffies, 1000, 1000);
+        assert!(usage.usages_norm.is_empty());
     }
 
     #[test]
@@ -130,11 +158,12 @@ mod tests {
 
         let mut new_jiffies = HashMap::new();
         new_jiffies.insert(42_u32, 150_u64);
-        let usage = state.calculate_cpu_usage(new_jiffies, 1_000, 1_200);
+        let usage = state.calculate_cpu_usage(&new_jiffies, 1_000, 1_200);
 
-        let val = usage.get(&42_u32).copied().unwrap_or(-1.0);
+        let val = usage.usages_norm.get(&42_u32).copied().unwrap_or(-1.0);
         // %CPU for this pid should be 25 so subtracting 25 leaves us with 0
         assert!((val - 25.0).abs() < f64::EPSILON);
+        assert!((usage.total_proc_cpu_usage - 25.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -146,9 +175,9 @@ mod tests {
 
         let mut new_jiffies = HashMap::new();
         new_jiffies.insert(2_u32, 77_u64);
-        let usage = state.calculate_cpu_usage(new_jiffies, 100, 200);
+        let usage = state.calculate_cpu_usage(&new_jiffies, 100, 200);
 
-        assert_eq!(usage.get(&2_u32).copied(), Some(0.0));
+        assert_eq!(usage.usages_norm.get(&2_u32).copied(), Some(0.0));
     }
 
     #[test]
@@ -160,8 +189,20 @@ mod tests {
 
         let mut new_jiffies = HashMap::new();
         new_jiffies.insert(9_u32, 90_u64);
-        let usage = state.calculate_cpu_usage(new_jiffies, 100, 200);
+        let usage = state.calculate_cpu_usage(&new_jiffies, 100, 200);
 
-        assert_eq!(usage.get(&9_u32).copied(), Some(0.0));
+        assert_eq!(usage.usages_norm.get(&9_u32).copied(), Some(0.0));
+    }
+
+    #[test]
+    fn calculate_relative_cpu_usage_scales_to_hundred() {
+        let state = SystemState::new();
+        let mut usages = HashMap::new();
+        usages.insert(1_u32, 20.0);
+        usages.insert(2_u32, 30.0);
+
+        let relative = state.calculate_relative_cpu_usage(&usages, 50.0);
+        assert_eq!(relative.get(&1_u32).copied(), Some(40.0));
+        assert_eq!(relative.get(&2_u32).copied(), Some(60.0));
     }
 }
