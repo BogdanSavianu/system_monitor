@@ -7,7 +7,7 @@ pub struct SystemStatusFileModel {
 
 impl SystemStatusFileModel {
     pub fn new() -> Self {
-        SystemStatusFileModel { 
+        SystemStatusFileModel {
             total_cpu: 0,
             cpus: vec![],
             num_cores: 0,
@@ -15,6 +15,10 @@ impl SystemStatusFileModel {
     }
 
     pub fn build(total_cpu: u64, cpus: Vec<u64>, num_cores: u8) -> Self {
-        SystemStatusFileModel { total_cpu, cpus, num_cores }
+        SystemStatusFileModel {
+            total_cpu,
+            cpus,
+            num_cores,
+        }
     }
 }

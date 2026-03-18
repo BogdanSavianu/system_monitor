@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{hashmap, model::CpuUsageResultModel, process::Process, thread::Thread, util::types::*};
+use crate::{
+    hashmap, model::CpuUsageResultModel, process::Process, thread::Thread, util::types::*,
+};
 
 #[derive(Debug)]
 pub struct SystemState {
@@ -66,7 +68,12 @@ impl SystemState {
         self.thread_jiffies.insert(tid, jiffies);
     }
 
-    pub fn calculate_cpu_usage(&self, new_jiffies: &HashMap<Pid, u64>, total0: u64, total1: u64) -> CpuUsageResultModel {
+    pub fn calculate_cpu_usage(
+        &self,
+        new_jiffies: &HashMap<Pid, u64>,
+        total0: u64,
+        total1: u64,
+    ) -> CpuUsageResultModel {
         let d_total = total1.saturating_sub(total0);
         if d_total == 0 {
             return CpuUsageResultModel::new();
@@ -112,7 +119,12 @@ impl SystemState {
         relative
     }
 
-    pub fn calculate_thread_cpu_usage(&self, new_jiffies: &HashMap<Tid, u64>, total0: u64, total1: u64) -> HashMap<Tid, f64> {
+    pub fn calculate_thread_cpu_usage(
+        &self,
+        new_jiffies: &HashMap<Tid, u64>,
+        total0: u64,
+        total1: u64,
+    ) -> HashMap<Tid, f64> {
         let d_total = total1.saturating_sub(total0);
         if d_total == 0 {
             return hashmap![];

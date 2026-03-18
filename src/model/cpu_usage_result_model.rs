@@ -15,7 +15,10 @@ impl CpuUsageResultModel {
         }
     }
 
-    pub fn with_values(usages_norm: HashMap<Pid, f64>, total_proc_cpu_usage: f64) -> CpuUsageResultModel {
+    pub fn with_values(
+        usages_norm: HashMap<Pid, f64>,
+        total_proc_cpu_usage: f64,
+    ) -> CpuUsageResultModel {
         CpuUsageResultModel {
             usages_norm,
             total_proc_cpu_usage,

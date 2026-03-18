@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
-use crate::{hashmap, model::{ProcessNetworkStatsModel, SocketInfoModel}, util::{Inode, Pid}};
+use crate::{
+    hashmap,
+    model::{ProcessNetworkStatsModel, SocketInfoModel},
+    util::{Inode, Pid},
+};
 
 #[derive(Debug, Clone)]
 pub struct NetworkSnapshotModel {

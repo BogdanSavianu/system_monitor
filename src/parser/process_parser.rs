@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, Read};
 use crate::model::ProcessStatusFileModel;
 use crate::process::Process;
 use crate::thread::Thread;
-use crate::util::{types::*, parser_utils::*};
+use crate::util::{parser_utils::*, types::*};
 
 const BASE_PROC_PATH: &str = "/proc";
 
@@ -26,7 +26,8 @@ impl ProcessParser {
     }
 
     fn parse_status_info<R>(&self, reader: R) -> Result<ProcessStatusFileModel, ParseError>
-        where R: BufRead,
+    where
+        R: BufRead,
     {
         let mut vm_size: Option<Vm> = None;
         let mut pm_size: Option<Pm> = None;
@@ -43,43 +44,50 @@ impl ProcessParser {
                 (Some("VmSize:"), Some(val)) => {
                     vm_size = Some(
                         val.parse::<Vm>()
-                            .map_err(|err| ParseError::ParsingError(err.to_string()))? as Vm
+                            .map_err(|err| ParseError::ParsingError(err.to_string()))?
+                            as Vm,
                     );
                 }
 
                 (Some("VmRSS:"), Some(val)) => {
                     pm_size = Some(
                         val.parse::<Pm>()
-                            .map_err(|err| ParseError::ParsingError(err.to_string()))? as Pm
+                            .map_err(|err| ParseError::ParsingError(err.to_string()))?
+                            as Pm,
                     );
                 }
 
                 (Some("VmSwap:"), Some(val)) => {
                     swap_size = Some(
                         val.parse::<Swap>()
-                            .map_err(|err| ParseError::ParsingError(err.to_string()))? as Swap
+                            .map_err(|err| ParseError::ParsingError(err.to_string()))?
+                            as Swap,
                     );
                 }
 
                 (Some("Threads:"), Some(val)) => {
                     thread_count = Some(
                         val.parse::<u32>()
-                            .map_err(|err| ParseError::ParsingError(err.to_string()))?
+                            .map_err(|err| ParseError::ParsingError(err.to_string()))?,
                     );
                 }
 
                 _ => {}
             }
 
-            if vm_size.is_some() && pm_size.is_some() && swap_size.is_some() && thread_count.is_some() {
+            if vm_size.is_some()
+                && pm_size.is_some()
+                && swap_size.is_some()
+                && thread_count.is_some()
+            {
                 break;
             }
-
         }
 
         match (vm_size, pm_size, swap_size, thread_count) {
-            (Some(vm), Some(pm), Some(swap), Some(th_count)) 
-                => Ok(ProcessStatusFileModel::new(vm, pm, swap, th_count)),
+            (Some(vm), Some(pm), Some(swap), Some(th_count)) => {
+                Ok(ProcessStatusFileModel::new(vm, pm, swap, th_count))
+            }
             _ => Err(ParseError::ParsingError(
                 "VmSize or VmRSS not found in status".into(),
             )),
@@ -87,7 +95,8 @@ impl ProcessParser {
     }
 
     fn read_entire_file(&self, file_path: &String) -> Result<String, ParseError> {
-        let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let file =
+            File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
         let mut buf_reader = BufReader::new(file);
         let mut buf = String::new();
         let _ = buf_reader.read_to_string(&mut buf);
@@ -95,15 +104,18 @@ impl ProcessParser {
         Ok(buf)
     }
 
-    fn parse_stat_info<R>(&self, mut buf_reader: R) -> Result<(u64, u64), ParseError> 
-        where R: BufRead,
+    fn parse_stat_info<R>(&self, mut buf_reader: R) -> Result<(u64, u64), ParseError>
+    where
+        R: BufRead,
     {
         let mut content = String::new();
         let size_read = buf_reader
             .read_to_string(&mut content)
             .map_err(|err| ParseError::ParsingError(err.to_string()))?;
         if size_read == 0 {
-            return Err(ParseError::ParsingError("Stat file has 0 bytes".to_string()));
+            return Err(ParseError::ParsingError(
+                "Stat file has 0 bytes".to_string(),
+            ));
         }
 
         let content = content.trim();
@@ -120,7 +132,9 @@ impl ProcessParser {
             .ok_or_else(|| ParseError::ParsingError("Stat file has wrong format".to_string()))?;
 
         if comm_end <= comm_start {
-            return Err(ParseError::ParsingError("Stat file has wrong format".to_string()));
+            return Err(ParseError::ParsingError(
+                "Stat file has wrong format".to_string(),
+            ));
         }
 
         // skip state and ppid
@@ -175,7 +189,7 @@ impl TraitProcessParser for ProcessParser {
         process.swap_mem = status_file_model.swap_mem;
         process.thread_count = status_file_model.thread_count;
 
-        Ok (process)
+        Ok(process)
     }
 
     fn get_threads_for_pid(&self, pid: Pid) -> Result<Vec<Thread>, ParseError> {
@@ -202,14 +216,16 @@ impl TraitProcessParser for ProcessParser {
 
     fn get_status_info(&self, pid: Pid) -> Result<ProcessStatusFileModel, ParseError> {
         let file_path = format!("{BASE_PROC_PATH}/{pid}/status");
-        let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let file =
+            File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
         let buf_reader = BufReader::new(file);
         self.parse_status_info(buf_reader)
     }
 
     fn get_stat_info(&self, pid: Pid) -> Result<(u64, u64), ParseError> {
         let file_path = format!("{BASE_PROC_PATH}/{pid}/stat");
-        let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let file =
+            File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
         let buf_reader = BufReader::new(file);
         self.parse_stat_info(buf_reader)
     }

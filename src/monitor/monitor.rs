@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use crate::{
     dto::{ProcessCpuSampleDTO, ThreadCpuSampleDTO},
-    parser::{parser::TraitProcessParser, thread_parser::TraitThreadParser, Parser, ProcessParser, ThreadParser},
+    parser::{
+        Parser, ProcessParser, ThreadParser, parser::TraitProcessParser,
+        thread_parser::TraitThreadParser,
+    },
     state::SystemState,
     util::{ParseError, Pid, Tid},
 };
@@ -33,7 +36,9 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Monitor<ProcP
     }
 
     pub fn initialize_sampling(&mut self) -> Result<(), ParseError> {
-        let total0 = self.parser.initialize_cpu_sampling(&mut self.system_state)?;
+        let total0 = self
+            .parser
+            .initialize_cpu_sampling(&mut self.system_state)?;
         self.previous_total_cpu = Some(total0);
 
         Ok(())
@@ -49,7 +54,9 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Monitor<ProcP
         Ok(thread_usage)
     }
 
-    pub fn sample_usage_maps(&mut self) -> Result<(HashMap<Pid, f64>, HashMap<Tid, f64>), ParseError> {
+    pub fn sample_usage_maps(
+        &mut self,
+    ) -> Result<(HashMap<Pid, f64>, HashMap<Tid, f64>), ParseError> {
         let total0 = self.previous_total_cpu.ok_or_else(|| {
             ParseError::ParsingError("monitor sampling is not initialized".to_string())
         })?;
@@ -61,9 +68,9 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Monitor<ProcP
         let process_cpu_usage = self
             .system_state
             .calculate_cpu_usage(&new_jiffies, total0, total1);
-        let thread_cpu_usage = self
-            .system_state
-            .calculate_thread_cpu_usage(&new_thread_jiffies, total0, total1);
+        let thread_cpu_usage =
+            self.system_state
+                .calculate_thread_cpu_usage(&new_thread_jiffies, total0, total1);
 
         self.system_state.update_jiffies(new_jiffies);
         self.system_state.update_thread_jiffies(new_thread_jiffies);
@@ -141,7 +148,7 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Monitor<ProcP
                 dto.io_syscw = thread.io_syscw;
 
                 Some(dto)
-                })
+            })
             .collect();
 
         samples.sort_by(|a, b| b.cpu_top.total_cmp(&a.cpu_top));

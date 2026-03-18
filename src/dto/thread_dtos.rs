@@ -21,7 +21,14 @@ pub struct ThreadCpuSampleDTO {
 }
 
 impl ThreadCpuSampleDTO {
-    pub fn new(pid: Pid, tid: Tid, process_name: String, thread_name: String, cpu_norm: f64, cpu_top: f64) -> Self {
+    pub fn new(
+        pid: Pid,
+        tid: Tid,
+        process_name: String,
+        thread_name: String,
+        cpu_norm: f64,
+        cpu_top: f64,
+    ) -> Self {
         ThreadCpuSampleDTO {
             pid,
             tid,

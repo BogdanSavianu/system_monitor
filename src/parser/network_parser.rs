@@ -94,21 +94,14 @@ impl NetworkParser {
             let mut socket = match protocol {
                 NetworkProtocolEnum::Tcp | NetworkProtocolEnum::Tcp6 => {
                     let tcp_state = self.parse_tcp_state(cols[3])?;
-                    SocketInfoModel::with_tcp(
-                        protocol.clone(),
-                        local_addr,
-                        remote_addr,
-                        tcp_state,
-                    )
+                    SocketInfoModel::with_tcp(protocol.clone(), local_addr, remote_addr, tcp_state)
                 }
                 NetworkProtocolEnum::Udp | NetworkProtocolEnum::Udp6 => {
                     SocketInfoModel::with_udp(protocol.clone(), local_addr, remote_addr)
                 }
             };
 
-            socket
-                .add_ports(local_port, remote_port)
-                .add_inode(inode);
+            socket.add_ports(local_port, remote_port).add_inode(inode);
 
             sockets.push(socket);
         }

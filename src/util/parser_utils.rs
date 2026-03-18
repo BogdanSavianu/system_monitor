@@ -3,7 +3,7 @@ use std::num::ParseIntError;
 #[derive(Debug)]
 pub enum ParseError {
     NonExistingResource(u32),
-    ParsingError(String)
+    ParsingError(String),
 }
 
 impl From<ParseIntError> for ParseError {
@@ -13,8 +13,7 @@ impl From<ParseIntError> for ParseError {
 }
 
 pub fn extract_pid_from_path(path: &String) -> Result<u32, ParseError> {
-    path
-        .split("/")
+    path.split("/")
         .nth(2)
         .ok_or_else(|| ParseError::ParsingError(path.clone()))?
         .parse::<u32>()
@@ -22,8 +21,7 @@ pub fn extract_pid_from_path(path: &String) -> Result<u32, ParseError> {
 }
 
 pub fn extract_tid_from_path(path: &String) -> Result<u32, ParseError> {
-    path
-        .split("/")
+    path.split("/")
         .nth(4)
         .ok_or_else(|| ParseError::ParsingError(path.clone()))?
         .parse::<u32>()

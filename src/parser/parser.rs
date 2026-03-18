@@ -3,10 +3,10 @@ use std::fs::{File, read_dir};
 use std::io::{BufRead, BufReader};
 
 use crate::hashmap;
+use crate::model::SystemStatusFileModel;
 use crate::process::Process;
 use crate::state::SystemState;
 use crate::util::{Pid, Tid, parser_utils::*};
-use crate::model::SystemStatusFileModel;
 
 pub use super::process_parser::*;
 pub use super::thread_parser::*;
@@ -16,15 +16,14 @@ pub struct Parser<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> 
     pub thread_parser: ThrParser,
 }
 
-
 impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Parser<ProcParser, ThrParser> {
     pub fn new(process_parser: ProcParser, thread_parser: ThrParser) -> Self {
-        Parser { 
+        Parser {
             process_parser,
             thread_parser,
         }
     }
-    
+
     // this DOES NOT include jiffies
     pub fn parse_all_processes(&self) -> Vec<Process> {
         let mut processes: Vec<Process> = vec![];
@@ -98,7 +97,10 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Parser<ProcPa
         }
     }
 
-    pub fn initialize_cpu_sampling(&self, system_state: &mut SystemState) -> Result<u64, ParseError> {
+    pub fn initialize_cpu_sampling(
+        &self,
+        system_state: &mut SystemState,
+    ) -> Result<u64, ParseError> {
         self.refresh_process_snapshot(system_state);
 
         let sys0 = self.get_status_info()?;
@@ -115,7 +117,8 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Parser<ProcPa
 
     pub fn get_status_info(&self) -> Result<SystemStatusFileModel, ParseError> {
         let file_path = format!("/proc/stat");
-        let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let file =
+            File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
         let buf_reader = BufReader::new(file);
         self.parse_status_info(buf_reader)
     }
@@ -146,7 +149,8 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Parser<ProcPa
     }
 
     fn parse_status_info<R>(&self, reader: R) -> Result<SystemStatusFileModel, ParseError>
-        where R: BufRead,
+    where
+        R: BufRead,
     {
         let mut total_cpu: Option<u64> = None;
         let mut cpus: Vec<u64> = Vec::new();
@@ -188,7 +192,6 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Parser<ProcPa
         Ok(SystemStatusFileModel::build(total_cpu, cpus, num_cores))
     }
 
-
     fn sum_cpu_jiffies(&self, fields: &[&str]) -> Result<u64, ParseError> {
         if fields.len() < 8 {
             return Err(ParseError::ParsingError(
@@ -203,7 +206,6 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Parser<ProcPa
             .sum::<Result<u64, _>>()
             .map_err(ParseError::from)
     }
-
 }
 
 #[cfg(test)]
@@ -233,25 +235,39 @@ mod tests {
         }
 
         fn get_status_info(&self, _pid: Pid) -> Result<ProcessStatusFileModel, ParseError> {
-            Err(ParseError::ParsingError("not used in this test".to_string()))
+            Err(ParseError::ParsingError(
+                "not used in this test".to_string(),
+            ))
         }
 
         fn get_stat_info(&self, _pid: Pid) -> Result<(u64, u64), ParseError> {
-            Err(ParseError::ParsingError("not used in this test".to_string()))
+            Err(ParseError::ParsingError(
+                "not used in this test".to_string(),
+            ))
         }
 
         fn get_process_name(&self, _pid: Pid) -> Result<String, ParseError> {
-            Err(ParseError::ParsingError("not used in this test".to_string()))
+            Err(ParseError::ParsingError(
+                "not used in this test".to_string(),
+            ))
         }
 
         fn get_process_cmdline(&self, _pid: Pid) -> Result<String, ParseError> {
-            Err(ParseError::ParsingError("not used in this test".to_string()))
+            Err(ParseError::ParsingError(
+                "not used in this test".to_string(),
+            ))
         }
     }
 
     impl TraitThreadParser for DummyThreadParser {
-        fn get_thread_stat_info(&self, _pid: Pid, _tid: crate::util::Tid) -> Result<(u64, u64), ParseError> {
-            Err(ParseError::ParsingError("not used in this test".to_string()))
+        fn get_thread_stat_info(
+            &self,
+            _pid: Pid,
+            _tid: crate::util::Tid,
+        ) -> Result<(u64, u64), ParseError> {
+            Err(ParseError::ParsingError(
+                "not used in this test".to_string(),
+            ))
         }
 
         fn parse_thread(&self, _pid: Pid, thread: Thread) -> Thread {

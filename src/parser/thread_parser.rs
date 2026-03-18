@@ -28,7 +28,9 @@ impl ThreadParser {
             .read_to_string(&mut content)
             .map_err(|err| ParseError::ParsingError(err.to_string()))?;
         if size_read == 0 {
-            return Err(ParseError::ParsingError("Stat file has 0 bytes".to_string()));
+            return Err(ParseError::ParsingError(
+                "Stat file has 0 bytes".to_string(),
+            ));
         }
 
         let content = content.trim();
@@ -41,7 +43,9 @@ impl ThreadParser {
             .ok_or_else(|| ParseError::ParsingError("Stat file has wrong format".to_string()))?;
 
         if comm_end <= comm_start {
-            return Err(ParseError::ParsingError("Stat file has wrong format".to_string()));
+            return Err(ParseError::ParsingError(
+                "Stat file has wrong format".to_string(),
+            ));
         }
 
         let after_comm = &content[(comm_end + 2)..];
@@ -140,7 +144,8 @@ impl ThreadParser {
 
     fn get_thread_comm(&self, pid: Pid, tid: Tid) -> Result<String, ParseError> {
         let file_path = format!("{}/comm", self.get_thread_base_path(pid, tid));
-        let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let file =
+            File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
         let mut reader = BufReader::new(file);
         let mut content = String::new();
         reader
@@ -154,7 +159,8 @@ impl ThreadParser {
 impl TraitThreadParser for ThreadParser {
     fn get_thread_stat_info(&self, pid: Pid, tid: Tid) -> Result<(u64, u64), ParseError> {
         let file_path = format!("{BASE_PROC_PATH}/{pid}/task/{tid}/stat");
-        let file = File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let file =
+            File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
         let buf_reader = BufReader::new(file);
         let stat_info = self.parse_stat_info(buf_reader)?;
 
@@ -230,7 +236,8 @@ mod tests {
     #[test]
     fn parse_io_info_reads_core_io_counters() {
         let parser = ThreadParser::new();
-        let input = "rchar: 1000\nwchar: 2000\nsyscr: 10\nsyscw: 20\nread_bytes: 300\nwrite_bytes: 400\n";
+        let input =
+            "rchar: 1000\nwchar: 2000\nsyscr: 10\nsyscw: 20\nread_bytes: 300\nwrite_bytes: 400\n";
         let mut thread = crate::thread::Thread::new(333);
 
         parser

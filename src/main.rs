@@ -2,7 +2,7 @@ use std::{env, thread::sleep, time::Duration};
 
 use system_monitor::{
     monitor::Monitor,
-    parser::{network_parser::TraitNetworkParser, NetworkParser, ProcessParser, ThreadParser},
+    parser::{NetworkParser, ProcessParser, ThreadParser, network_parser::TraitNetworkParser},
     util::ParseError,
 };
 
@@ -38,10 +38,13 @@ fn parse_args() -> Result<(bool, Option<u32>), ParseError> {
             continue;
         }
 
-        if let Some(pid_str) = arg.strip_prefix("-pid=").or_else(|| arg.strip_prefix("--pid=")) {
-            let pid = pid_str
-                .parse::<u32>()
-                .map_err(|err| ParseError::ParsingError(format!("invalid pid '{}': {}", pid_str, err)))?;
+        if let Some(pid_str) = arg
+            .strip_prefix("-pid=")
+            .or_else(|| arg.strip_prefix("--pid="))
+        {
+            let pid = pid_str.parse::<u32>().map_err(|err| {
+                ParseError::ParsingError(format!("invalid pid '{}': {}", pid_str, err))
+            })?;
             pid_filter = Some(pid);
             continue;
         }
@@ -104,7 +107,7 @@ fn print_samples(
     Ok(())
 }
 
-fn main() -> Result<(), ParseError>{
+fn main() -> Result<(), ParseError> {
     let (show_threads, pid_filter) = parse_args()?;
 
     print_network()?;

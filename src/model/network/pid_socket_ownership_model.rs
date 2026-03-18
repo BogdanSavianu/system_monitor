@@ -15,9 +15,6 @@ impl PidSocketOwnershipModel {
     }
 
     pub fn with_values(pid: Pid, socket_inodes: Vec<Inode>) -> Self {
-        PidSocketOwnershipModel {
-            pid,
-            socket_inodes,
-        }
+        PidSocketOwnershipModel { pid, socket_inodes }
     }
 }

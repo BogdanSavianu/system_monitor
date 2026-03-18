@@ -3,7 +3,6 @@ use std::fmt::Display;
 pub use crate::thread::Thread;
 use crate::util::types::*;
 
-
 #[derive(Debug, Clone)]
 pub struct Process {
     pub pid: Pid,
@@ -18,7 +17,7 @@ pub struct Process {
 
 impl Process {
     pub fn new(pid: Pid) -> Self {
-        Process { 
+        Process {
             pid,
             name: "".into(),
             cmdline: "".into(),
@@ -32,14 +31,22 @@ impl Process {
 
 impl Display for Process {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, 
-"Process id: {:?},
+        write!(
+            f,
+            "Process id: {:?},
     Name: {:?},
     CmdLine: {:?},
     Thread Count: {:?},
     Virtual Memory: {:?},
     Physical Memory: {:?},
     Swap Memory: {:?}",
-    self.pid, self.name, self.cmdline, self.thread_count, self.virtual_mem, self.physical_mem, self.swap_mem)
+            self.pid,
+            self.name,
+            self.cmdline,
+            self.thread_count,
+            self.virtual_mem,
+            self.physical_mem,
+            self.swap_mem
+        )
     }
 }

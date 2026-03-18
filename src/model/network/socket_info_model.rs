@@ -1,4 +1,7 @@
-use crate::{model::{NetworkProtocolEnum, TcpStateEnum}, util::{Inode, Port}};
+use crate::{
+    model::{NetworkProtocolEnum, TcpStateEnum},
+    util::{Inode, Port},
+};
 
 #[derive(Debug, Clone)]
 pub struct SocketInfoModel {
@@ -53,8 +56,7 @@ impl SocketInfoModel {
     }
 
     pub fn add_ports(&mut self, local_port: Port, remote_port: Port) -> &mut Self {
-        self.add_local_port(local_port)
-            .add_remote_port(remote_port)
+        self.add_local_port(local_port).add_remote_port(remote_port)
     }
 
     pub fn add_local_port(&mut self, local_port: Port) -> &mut Self {
@@ -65,7 +67,7 @@ impl SocketInfoModel {
 
     pub fn add_remote_port(&mut self, remote_port: Port) -> &mut Self {
         self.remote_port = remote_port;
-        
+
         self
     }
 }
