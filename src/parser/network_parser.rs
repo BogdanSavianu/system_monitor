@@ -1,10 +1,11 @@
-use std::fs::File;
+use std::collections::HashSet;
+use std::fs::{File, read_dir, read_link};
 use std::io::{BufRead, BufReader};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::{
-    model::{NetworkProtocolEnum, SocketInfoModel, TcpStateEnum},
-    util::ParseError,
+    model::{NetworkProtocolEnum, PidSocketOwnershipModel, SocketInfoModel, TcpStateEnum},
+    util::{ParseError, Pid},
 };
 
 const NET_TCP_PATH: &str = "/proc/net/tcp";
@@ -18,6 +19,8 @@ pub trait TraitNetworkParser {
     fn get_net_udp_info(&self) -> Result<Vec<SocketInfoModel>, ParseError>;
     fn get_net_udp6_info(&self) -> Result<Vec<SocketInfoModel>, ParseError>;
     fn get_all_net_socket_info(&self) -> Result<Vec<SocketInfoModel>, ParseError>;
+    fn get_pid_socket_ownership(&self, pid: Pid) -> Result<PidSocketOwnershipModel, ParseError>;
+    fn get_all_pid_socket_ownership(&self) -> Result<Vec<PidSocketOwnershipModel>, ParseError>;
 }
 
 pub struct NetworkParser;
@@ -46,6 +49,67 @@ impl TraitNetworkParser for NetworkParser {
         all.extend(self.get_net_udp_info()?);
         all.extend(self.get_net_udp6_info()?);
         Ok(all)
+    }
+
+    fn get_pid_socket_ownership(&self, pid: Pid) -> Result<PidSocketOwnershipModel, ParseError> {
+        let fd_dir = format!("/proc/{pid}/fd");
+        let entries = read_dir(fd_dir).map_err(|err| ParseError::ParsingError(err.to_string()))?;
+
+        let mut socket_inodes: HashSet<u64> = HashSet::new();
+
+        for entry in entries {
+            let Ok(entry) = entry else {
+                continue;
+            };
+
+            let Ok(target) = read_link(entry.path()) else {
+                continue;
+            };
+
+            let Some(target_text) = target.to_str() else {
+                continue;
+            };
+
+            if let Some(inode) = self.parse_socket_inode_target(target_text) {
+                socket_inodes.insert(inode);
+            }
+        }
+
+        let mut socket_inodes: Vec<u64> = socket_inodes.into_iter().collect();
+        socket_inodes.sort();
+
+        Ok(PidSocketOwnershipModel::with_values(pid, socket_inodes))
+    }
+
+    fn get_all_pid_socket_ownership(&self) -> Result<Vec<PidSocketOwnershipModel>, ParseError> {
+        let entries = read_dir("/proc").map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let mut ownership = Vec::new();
+
+        for entry in entries {
+            let Ok(entry) = entry else {
+                continue;
+            };
+
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+
+            let Some(pid_text) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+
+            let Ok(pid) = pid_text.parse::<u32>() else {
+                continue;
+            };
+
+            // in case process exits during scan, skip it
+            if let Ok(pid_ownership) = self.get_pid_socket_ownership(pid) {
+                ownership.push(pid_ownership);
+            }
+        }
+
+        Ok(ownership)
     }
 }
 
@@ -196,6 +260,11 @@ impl NetworkParser {
             ))),
         }
     }
+
+    fn parse_socket_inode_target(&self, target: &str) -> Option<u64> {
+        let stripped = target.strip_prefix("socket:[")?.strip_suffix(']')?;
+        stripped.parse::<u64>().ok()
+    }
 }
 
 #[cfg(test)]
@@ -252,5 +321,23 @@ mod tests {
             .parse_tcp_state("0A")
             .expect("tcp state should have parsed");
         assert!(matches!(state, TcpStateEnum::Listen));
+    }
+
+    #[test]
+    fn parse_socket_inode_target_extracts_inode() {
+        let parser = NetworkParser::new();
+        let inode = parser.parse_socket_inode_target("socket:[123456]");
+        assert_eq!(inode, Some(123456));
+    }
+
+    #[test]
+    fn parse_socket_inode_target_rejects_non_socket_targets() {
+        let parser = NetworkParser::new();
+        assert_eq!(parser.parse_socket_inode_target("pipe:[123]"), None);
+        assert_eq!(
+            parser.parse_socket_inode_target("anon_inode:[eventfd]"),
+            None
+        );
+        assert_eq!(parser.parse_socket_inode_target("socket:123"), None);
     }
 }
