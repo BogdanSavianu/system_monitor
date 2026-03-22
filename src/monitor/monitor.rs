@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    dto::{ProcessCpuSampleDTO, ThreadCpuSampleDTO},
+    dto::{ProcessCpuSampleDTO, ProcessNetworkSampleDTO, ThreadCpuSampleDTO},
+    model::ProcessNetworkStatsModel,
     parser::{
         NetworkParser, Parser, ProcessParser, ThreadParser, network_parser::TraitNetworkParser,
         parser::TraitProcessParser, thread_parser::TraitThreadParser,
@@ -95,6 +96,48 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser, NetParser: Tr
         self.previous_total_cpu = Some(total1);
 
         Ok((process_cpu_usage.usages_norm, thread_cpu_usage))
+    }
+
+    pub fn sample_process_network_stats_map(
+        &mut self,
+    ) -> Result<HashMap<Pid, ProcessNetworkStatsModel>, ParseError> {
+        self.parser.refresh_process_snapshot(&mut self.system_state);
+        self.parser
+            .refresh_network_snapshot(&mut self.system_state)?;
+
+        Ok(self
+            .system_state
+            .network_snapshot
+            .process_stats_by_pid
+            .clone())
+    }
+
+    pub fn sample_process_network_stats(
+        &mut self,
+    ) -> Result<Vec<ProcessNetworkSampleDTO>, ParseError> {
+        let stats_by_pid = self.sample_process_network_stats_map()?;
+
+        let mut samples: Vec<ProcessNetworkSampleDTO> = stats_by_pid
+            .into_values()
+            .map(|stats| {
+                let process_name = self
+                    .system_state
+                    .get_process(stats.pid)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default();
+
+                ProcessNetworkSampleDTO::from_model(process_name, &stats)
+            })
+            .collect();
+
+        samples.sort_by(|a, b| {
+            b.total_sockets
+                .cmp(&a.total_sockets)
+                .then_with(|| b.tcp_open.cmp(&a.tcp_open))
+                .then_with(|| b.udp_open.cmp(&a.udp_open))
+        });
+
+        Ok(samples)
     }
 
     // adapter method that turns the HashMap into a more serializable Vec
