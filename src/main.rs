@@ -2,39 +2,23 @@ use std::{env, thread::sleep, time::Duration};
 
 use system_monitor::{
     monitor::Monitor,
-    parser::{NetworkParser, ProcessParser, ThreadParser, network_parser::TraitNetworkParser},
+    parser::{NetworkParser, ProcessParser, ThreadParser},
     util::ParseError,
 };
 
-fn print_network() -> Result<(), ParseError> {
-    let parser = NetworkParser::new();
-    let sockets = parser.get_all_net_socket_info()?;
-
-    println!("network_test: parsed {} sockets", sockets.len());
-
-    for socket in sockets.iter().take(5) {
-        println!(
-            "proto={:?} inode={} {}:{} -> {}:{} state={:?}",
-            socket.protocol,
-            socket.inode,
-            socket.local_addr,
-            socket.local_port,
-            socket.remote_addr,
-            socket.remote_port,
-            socket.tcp_state
-        );
-    }
-
-    Ok(())
-}
-
-fn parse_args() -> Result<(bool, Option<u32>), ParseError> {
+fn parse_args() -> Result<(bool, bool, Option<u32>), ParseError> {
     let mut show_threads = false;
+    let mut show_network = false;
     let mut pid_filter: Option<u32> = None;
 
     for arg in env::args().skip(1) {
         if arg == "-threads" || arg == "--threads" {
             show_threads = true;
+            continue;
+        }
+
+        if arg == "-network" || arg == "--network" {
+            show_network = true;
             continue;
         }
 
@@ -50,20 +34,39 @@ fn parse_args() -> Result<(bool, Option<u32>), ParseError> {
         }
 
         return Err(ParseError::ParsingError(format!(
-            "unknown argument '{}'. supported: -threads, -pid=<pid>",
+            "unknown argument '{}'. supported: -threads, -network, -pid=<pid>",
             arg
         )));
     }
 
-    Ok((show_threads, pid_filter))
+    Ok((show_threads, show_network, pid_filter))
 }
 
 fn print_samples(
     monitor: &mut Monitor<ProcessParser, ThreadParser, NetworkParser>,
     show_threads: bool,
+    show_network: bool,
     pid_filter: Option<u32>,
 ) -> Result<(), ParseError> {
-    if show_threads {
+    if show_network {
+        let network_samples = monitor.sample_process_network_stats()?;
+
+        for sample in network_samples
+            .iter()
+            .filter(|sample| pid_filter.is_none_or(|pid| sample.pid == pid))
+        {
+            println!(
+                "pid={} name={} tcp_open={} tcp_established={} tcp_listen={} udp_open={} sockets_total={}",
+                sample.pid,
+                sample.name,
+                sample.tcp_open,
+                sample.tcp_established,
+                sample.tcp_listen,
+                sample.udp_open,
+                sample.total_sockets,
+            );
+        }
+    } else if show_threads {
         let cpu_samples = monitor.sample_thread_cpu_usage()?;
 
         for sample in cpu_samples
@@ -108,9 +111,7 @@ fn print_samples(
 }
 
 fn main() -> Result<(), ParseError> {
-    let (show_threads, pid_filter) = parse_args()?;
-
-    print_network()?;
+    let (show_threads, show_network, pid_filter) = parse_args()?;
 
     let process_parser = ProcessParser::new();
     let thread_parser = ThreadParser::new();
@@ -123,7 +124,7 @@ fn main() -> Result<(), ParseError> {
     sleep(Duration::from_millis(2000));
 
     // t1
-    print_samples(&mut monitor, show_threads, pid_filter)?;
+    print_samples(&mut monitor, show_threads, show_network, pid_filter)?;
 
     //println!("{:#?}", system_state);
     //println!("{:#?}", parser.get_status_info());
