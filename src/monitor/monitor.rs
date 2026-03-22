@@ -3,33 +3,47 @@ use std::collections::HashMap;
 use crate::{
     dto::{ProcessCpuSampleDTO, ThreadCpuSampleDTO},
     parser::{
-        Parser, ProcessParser, ThreadParser, parser::TraitProcessParser,
-        thread_parser::TraitThreadParser,
+        NetworkParser, Parser, ProcessParser, ThreadParser, network_parser::TraitNetworkParser,
+        parser::TraitProcessParser, thread_parser::TraitThreadParser,
     },
     state::SystemState,
     util::{ParseError, Pid, Tid},
 };
 
-pub struct Monitor<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> {
-    parser: Parser<ProcParser, ThrParser>,
+pub struct Monitor<
+    ProcParser: TraitProcessParser,
+    ThrParser: TraitThreadParser,
+    NetParser: TraitNetworkParser,
+> {
+    parser: Parser<ProcParser, ThrParser, NetParser>,
     system_state: SystemState,
     previous_total_cpu: Option<u64>,
 }
 
-impl Monitor<ProcessParser, ThreadParser> {
+impl Monitor<ProcessParser, ThreadParser, NetworkParser> {
     pub fn new() -> Self {
         Monitor {
-            parser: Parser::new(ProcessParser::new(), ThreadParser::new()),
+            parser: Parser::new(
+                ProcessParser::new(),
+                ThreadParser::new(),
+                NetworkParser::new(),
+            ),
             system_state: SystemState::new(),
             previous_total_cpu: None,
         }
     }
 }
 
-impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Monitor<ProcParser, ThrParser> {
-    pub fn with_parsers(process_parser: ProcParser, thread_parser: ThrParser) -> Self {
+impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser, NetParser: TraitNetworkParser>
+    Monitor<ProcParser, ThrParser, NetParser>
+{
+    pub fn with_parsers(
+        process_parser: ProcParser,
+        thread_parser: ThrParser,
+        network_parser: NetParser,
+    ) -> Self {
         Monitor {
-            parser: Parser::new(process_parser, thread_parser),
+            parser: Parser::new(process_parser, thread_parser, network_parser),
             system_state: SystemState::new(),
             previous_total_cpu: None,
         }
@@ -62,6 +76,8 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Monitor<ProcP
         })?;
 
         self.parser.refresh_process_snapshot(&mut self.system_state);
+        self.parser
+            .refresh_network_snapshot(&mut self.system_state)?;
         let new_jiffies = self.parser.get_process_jiffies(&self.system_state);
         let new_thread_jiffies = self.parser.get_thread_jiffies(&self.system_state);
         let total1 = self.parser.get_status_info()?.total_cpu;
@@ -74,7 +90,8 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Monitor<ProcP
 
         self.system_state.update_jiffies(new_jiffies);
         self.system_state.update_thread_jiffies(new_thread_jiffies);
-        self.system_state.total_proc_cpu_percentage = process_cpu_usage.total_proc_cpu_usage;
+        self.system_state
+            .set_total_proc_cpu_percentage(process_cpu_usage.total_proc_cpu_usage);
         self.previous_total_cpu = Some(total1);
 
         Ok((process_cpu_usage.usages_norm, thread_cpu_usage))
@@ -84,9 +101,10 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Monitor<ProcP
     pub fn sample_cpu_usage(&mut self) -> Result<Vec<ProcessCpuSampleDTO>, ParseError> {
         let usage_map = self.sample_cpu_usage_map()?;
         let num_cores = self.system_state.num_cores as f64;
-        let usage_relative = self
-            .system_state
-            .calculate_relative_cpu_usage(&usage_map, self.system_state.total_proc_cpu_percentage);
+        let usage_relative = self.system_state.calculate_relative_cpu_usage(
+            &usage_map,
+            self.system_state.get_total_proc_cpu_percentage(),
+        );
 
         let mut samples: Vec<ProcessCpuSampleDTO> = usage_map
             .into_iter()

@@ -59,7 +59,7 @@ fn parse_args() -> Result<(bool, Option<u32>), ParseError> {
 }
 
 fn print_samples(
-    monitor: &mut Monitor<ProcessParser, ThreadParser>,
+    monitor: &mut Monitor<ProcessParser, ThreadParser, NetworkParser>,
     show_threads: bool,
     pid_filter: Option<u32>,
 ) -> Result<(), ParseError> {
@@ -114,7 +114,8 @@ fn main() -> Result<(), ParseError> {
 
     let process_parser = ProcessParser::new();
     let thread_parser = ThreadParser::new();
-    let mut monitor = Monitor::with_parsers(process_parser, thread_parser);
+    let network_parser = NetworkParser::new();
+    let mut monitor = Monitor::with_parsers(process_parser, thread_parser, network_parser);
 
     // t0
     monitor.initialize_sampling()?;

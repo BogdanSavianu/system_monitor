@@ -8,19 +8,32 @@ use crate::process::Process;
 use crate::state::SystemState;
 use crate::util::{Pid, Tid, parser_utils::*};
 
+pub use super::network_parser::*;
 pub use super::process_parser::*;
 pub use super::thread_parser::*;
 
-pub struct Parser<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> {
+pub struct Parser<
+    ProcParser: TraitProcessParser,
+    ThrParser: TraitThreadParser,
+    NetParser: TraitNetworkParser,
+> {
     pub process_parser: ProcParser,
     pub thread_parser: ThrParser,
+    pub network_parser: NetParser,
 }
 
-impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Parser<ProcParser, ThrParser> {
-    pub fn new(process_parser: ProcParser, thread_parser: ThrParser) -> Self {
+impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser, NetParser: TraitNetworkParser>
+    Parser<ProcParser, ThrParser, NetParser>
+{
+    pub fn new(
+        process_parser: ProcParser,
+        thread_parser: ThrParser,
+        network_parser: NetParser,
+    ) -> Self {
         Parser {
             process_parser,
             thread_parser,
+            network_parser,
         }
     }
 
@@ -102,6 +115,7 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Parser<ProcPa
         system_state: &mut SystemState,
     ) -> Result<u64, ParseError> {
         self.refresh_process_snapshot(system_state);
+        self.refresh_network_snapshot(system_state)?;
 
         let sys0 = self.get_status_info()?;
         system_state.num_cores = sys0.num_cores;
@@ -113,6 +127,16 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser> Parser<ProcPa
         system_state.update_thread_jiffies(prev_thread_jiffies);
 
         Ok(sys0.total_cpu)
+    }
+
+    pub fn refresh_network_snapshot(
+        &self,
+        system_state: &mut SystemState,
+    ) -> Result<(), ParseError> {
+        let network_snapshot = self.network_parser.get_network_snapshot()?;
+        system_state.update_network_snapshot(network_snapshot);
+
+        Ok(())
     }
 
     pub fn get_status_info(&self) -> Result<SystemStatusFileModel, ParseError> {
@@ -213,8 +237,11 @@ mod tests {
     use std::io::Cursor;
 
     use crate::{
-        model::ProcessStatusFileModel,
-        parser::{process_parser::TraitProcessParser, thread_parser::TraitThreadParser},
+        model::{NetworkSnapshotModel, ProcessStatusFileModel},
+        parser::{
+            network_parser::TraitNetworkParser, process_parser::TraitProcessParser,
+            thread_parser::TraitThreadParser,
+        },
         process::Process,
         thread::Thread,
         util::{parser_utils::ParseError, types::Pid},
@@ -224,6 +251,7 @@ mod tests {
 
     struct DummyProcessParser;
     struct DummyThreadParser;
+    struct DummyNetworkParser;
 
     impl TraitProcessParser for DummyProcessParser {
         fn parse_process(&self, _file_path: &String) -> Result<Process, ParseError> {
@@ -275,9 +303,59 @@ mod tests {
         }
     }
 
+    impl TraitNetworkParser for DummyNetworkParser {
+        fn get_net_tcp_info(&self) -> Result<Vec<crate::model::SocketInfoModel>, ParseError> {
+            Ok(vec![])
+        }
+
+        fn get_net_tcp6_info(&self) -> Result<Vec<crate::model::SocketInfoModel>, ParseError> {
+            Ok(vec![])
+        }
+
+        fn get_net_udp_info(&self) -> Result<Vec<crate::model::SocketInfoModel>, ParseError> {
+            Ok(vec![])
+        }
+
+        fn get_net_udp6_info(&self) -> Result<Vec<crate::model::SocketInfoModel>, ParseError> {
+            Ok(vec![])
+        }
+
+        fn get_all_net_socket_info(
+            &self,
+        ) -> Result<Vec<crate::model::SocketInfoModel>, ParseError> {
+            Ok(vec![])
+        }
+
+        fn get_pid_socket_ownership(
+            &self,
+            _pid: Pid,
+        ) -> Result<crate::model::PidSocketOwnershipModel, ParseError> {
+            Ok(crate::model::PidSocketOwnershipModel::new())
+        }
+
+        fn get_all_pid_socket_ownership(
+            &self,
+        ) -> Result<Vec<crate::model::PidSocketOwnershipModel>, ParseError> {
+            Ok(vec![])
+        }
+
+        fn get_process_network_stats(
+            &self,
+        ) -> Result<
+            std::collections::HashMap<Pid, crate::model::ProcessNetworkStatsModel>,
+            ParseError,
+        > {
+            Ok(std::collections::HashMap::new())
+        }
+
+        fn get_network_snapshot(&self) -> Result<NetworkSnapshotModel, ParseError> {
+            Ok(NetworkSnapshotModel::new())
+        }
+    }
+
     #[test]
     fn parse_status_info_extracts_total_and_per_core_jiffies() {
-        let parser = Parser::new(DummyProcessParser, DummyThreadParser);
+        let parser = Parser::new(DummyProcessParser, DummyThreadParser, DummyNetworkParser);
         let input = "cpu  10 20 30 40 50 60 70 80 90 100\n\
 cpu0 1 2 3 4 5 6 7 8 9 10\n\
 cpu1 2 3 4 5 6 7 8 9 10 11\n\
@@ -294,7 +372,7 @@ intr 123\n";
 
     #[test]
     fn parse_status_info_fails_without_aggregate_cpu_line() {
-        let parser = Parser::new(DummyProcessParser, DummyThreadParser);
+        let parser = Parser::new(DummyProcessParser, DummyThreadParser, DummyNetworkParser);
         let input = "cpu0 1 2 3 4 5 6 7 8\n";
 
         let result = parser.parse_status_info(Cursor::new(input));
@@ -303,7 +381,7 @@ intr 123\n";
 
     #[test]
     fn sum_cpu_jiffies_requires_minimum_fields() {
-        let parser = Parser::new(DummyProcessParser, DummyThreadParser);
+        let parser = Parser::new(DummyProcessParser, DummyThreadParser, DummyNetworkParser);
         let result = parser.sum_cpu_jiffies(&["1", "2", "3"]);
 
         assert!(result.is_err());

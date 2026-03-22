@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 
 use crate::{
-    hashmap, model::CpuUsageResultModel, process::Process, thread::Thread, util::types::*,
+    hashmap,
+    model::{CpuUsageResultModel, JiffyUsageModel, NetworkSnapshotModel},
+    process::Process,
+    thread::Thread,
+    util::types::*,
 };
 
 #[derive(Debug)]
@@ -10,9 +14,8 @@ pub struct SystemState {
     pub processes: HashMap<Pid, Process>,
     pub threads: HashMap<Tid, Thread>,
     pub threads_by_pid: HashMap<Pid, Vec<Tid>>,
-    pub process_jiffies: HashMap<Pid, u64>,
-    pub total_proc_cpu_percentage: f64,
-    pub thread_jiffies: HashMap<Tid, u64>,
+    pub network_snapshot: NetworkSnapshotModel,
+    pub jiffy_usage: JiffyUsageModel,
 }
 
 impl SystemState {
@@ -22,9 +25,8 @@ impl SystemState {
             processes: hashmap![],
             threads: hashmap![],
             threads_by_pid: hashmap![],
-            process_jiffies: hashmap![],
-            total_proc_cpu_percentage: 0_f64,
-            thread_jiffies: hashmap![],
+            network_snapshot: NetworkSnapshotModel::new(),
+            jiffy_usage: JiffyUsageModel::new(),
         }
     }
 
@@ -47,11 +49,24 @@ impl SystemState {
     }
 
     pub fn update_jiffies(&mut self, new_jiffies: HashMap<Pid, u64>) {
-        self.process_jiffies = new_jiffies;
+        self.jiffy_usage.update_process_jiffies(new_jiffies);
     }
 
     pub fn update_thread_jiffies(&mut self, new_jiffies: HashMap<Tid, u64>) {
-        self.thread_jiffies = new_jiffies;
+        self.jiffy_usage.update_thread_jiffies(new_jiffies);
+    }
+
+    pub fn set_total_proc_cpu_percentage(&mut self, total_proc_cpu_percentage: f64) {
+        self.jiffy_usage
+            .set_total_proc_cpu_percentage(total_proc_cpu_percentage);
+    }
+
+    pub fn get_total_proc_cpu_percentage(&self) -> f64 {
+        self.jiffy_usage.total_proc_cpu_percentage
+    }
+
+    pub fn update_network_snapshot(&mut self, network_snapshot: NetworkSnapshotModel) {
+        self.network_snapshot = network_snapshot;
     }
 
     pub fn clear_process_snapshot(&mut self) {
@@ -61,11 +76,11 @@ impl SystemState {
     }
 
     pub fn add_jiffies_for_pid(&mut self, pid: Pid, jiffies: u64) {
-        self.process_jiffies.insert(pid, jiffies);
+        self.jiffy_usage.process_jiffies.insert(pid, jiffies);
     }
 
     pub fn add_jiffies_for_tid(&mut self, tid: Tid, jiffies: u64) {
-        self.thread_jiffies.insert(tid, jiffies);
+        self.jiffy_usage.thread_jiffies.insert(tid, jiffies);
     }
 
     pub fn calculate_cpu_usage(
@@ -82,7 +97,7 @@ impl SystemState {
         let mut usages: HashMap<Pid, f64> = hashmap![];
         let mut total_proc_cpu_usage = 0_f64;
         for (pid, jiffie) in new_jiffies.iter() {
-            if let Some(prev_jiffie) = self.process_jiffies.get(pid) {
+            if let Some(prev_jiffie) = self.jiffy_usage.process_jiffies.get(pid) {
                 let d_proc = jiffie.saturating_sub(*prev_jiffie);
                 let pct_norm = 100.0 * (d_proc as f64) / (d_total as f64);
                 usages.insert(*pid, pct_norm);
@@ -132,7 +147,7 @@ impl SystemState {
 
         let mut usages: HashMap<Tid, f64> = hashmap![];
         for (tid, jiffie) in new_jiffies.iter() {
-            if let Some(prev_jiffie) = self.thread_jiffies.get(tid) {
+            if let Some(prev_jiffie) = self.jiffy_usage.thread_jiffies.get(tid) {
                 let d_thr = jiffie.saturating_sub(*prev_jiffie);
                 let pct_norm = 100.0 * (d_thr as f64) / (d_total as f64);
                 usages.insert(*tid, pct_norm);
