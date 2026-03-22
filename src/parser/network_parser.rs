@@ -1,8 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, read_dir, read_link};
 use std::io::{BufRead, BufReader};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+use crate::hashmap;
+use crate::model::{NetworkSnapshotModel, ProcessNetworkStatsModel};
+use crate::util::Inode;
 use crate::{
     model::{NetworkProtocolEnum, PidSocketOwnershipModel, SocketInfoModel, TcpStateEnum},
     util::{ParseError, Pid},
@@ -21,6 +24,10 @@ pub trait TraitNetworkParser {
     fn get_all_net_socket_info(&self) -> Result<Vec<SocketInfoModel>, ParseError>;
     fn get_pid_socket_ownership(&self, pid: Pid) -> Result<PidSocketOwnershipModel, ParseError>;
     fn get_all_pid_socket_ownership(&self) -> Result<Vec<PidSocketOwnershipModel>, ParseError>;
+    fn get_process_network_stats(
+        &self,
+    ) -> Result<HashMap<Pid, ProcessNetworkStatsModel>, ParseError>;
+    fn get_network_snapshot(&self) -> Result<NetworkSnapshotModel, ParseError>;
 }
 
 pub struct NetworkParser;
@@ -110,6 +117,23 @@ impl TraitNetworkParser for NetworkParser {
         }
 
         Ok(ownership)
+    }
+
+    fn get_process_network_stats(
+        &self,
+    ) -> Result<HashMap<Pid, ProcessNetworkStatsModel>, ParseError> {
+        let sockets_by_inode = self.get_sockets_by_inode()?;
+        self.get_process_stats_for_sockets(&sockets_by_inode)
+    }
+
+    fn get_network_snapshot(&self) -> Result<NetworkSnapshotModel, ParseError> {
+        let sockets_by_inode = self.get_sockets_by_inode()?;
+        let process_stats_by_pid = self.get_process_stats_for_sockets(&sockets_by_inode)?;
+
+        Ok(NetworkSnapshotModel::with_values(
+            sockets_by_inode,
+            process_stats_by_pid,
+        ))
     }
 }
 
@@ -265,14 +289,72 @@ impl NetworkParser {
         let stripped = target.strip_prefix("socket:[")?.strip_suffix(']')?;
         stripped.parse::<u64>().ok()
     }
+
+    fn build_sockets_by_inode(
+        &self,
+        sockets: Vec<SocketInfoModel>,
+    ) -> HashMap<Inode, SocketInfoModel> {
+        let mut sockets_by_inode: HashMap<Inode, SocketInfoModel> = hashmap![];
+        for socket in sockets {
+            sockets_by_inode.insert(socket.inode, socket);
+        }
+
+        sockets_by_inode
+    }
+
+    fn build_process_stats_by_pid(
+        &self,
+        ownership: Vec<PidSocketOwnershipModel>,
+        sockets_by_inode: &HashMap<Inode, SocketInfoModel>,
+    ) -> HashMap<Pid, ProcessNetworkStatsModel> {
+        let mut process_stats_by_pid: HashMap<Pid, ProcessNetworkStatsModel> = hashmap![];
+
+        for pid_ownership in ownership {
+            let stats = self.aggregate_process_stats(&pid_ownership, sockets_by_inode);
+            process_stats_by_pid.insert(stats.pid, stats);
+        }
+
+        process_stats_by_pid
+    }
+
+    fn get_sockets_by_inode(&self) -> Result<HashMap<Inode, SocketInfoModel>, ParseError> {
+        let sockets = self.get_all_net_socket_info()?;
+        Ok(self.build_sockets_by_inode(sockets))
+    }
+
+    fn get_process_stats_for_sockets(
+        &self,
+        sockets_by_inode: &HashMap<Inode, SocketInfoModel>,
+    ) -> Result<HashMap<Pid, ProcessNetworkStatsModel>, ParseError> {
+        let ownership = self.get_all_pid_socket_ownership()?;
+        Ok(self.build_process_stats_by_pid(ownership, sockets_by_inode))
+    }
+
+    fn aggregate_process_stats(
+        &self,
+        ownership: &PidSocketOwnershipModel,
+        sockets_by_inode: &HashMap<Inode, SocketInfoModel>,
+    ) -> ProcessNetworkStatsModel {
+        let mut stats = ProcessNetworkStatsModel::with_pid(ownership.pid);
+        for inode in &ownership.socket_inodes {
+            if let Some(socket) = sockets_by_inode.get(inode) {
+                stats.accumulate_socket(*inode, socket);
+            }
+        }
+
+        stats
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::io::Cursor;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-    use crate::model::{NetworkProtocolEnum, TcpStateEnum};
+    use crate::model::{
+        NetworkProtocolEnum, PidSocketOwnershipModel, SocketInfoModel, TcpStateEnum,
+    };
 
     use super::NetworkParser;
 
@@ -339,5 +421,130 @@ mod tests {
             None
         );
         assert_eq!(parser.parse_socket_inode_target("socket:123"), None);
+    }
+
+    #[test]
+    fn build_sockets_by_inode_indexes_sockets() {
+        let parser = NetworkParser::new();
+
+        let mut tcp = SocketInfoModel::with_tcp(
+            NetworkProtocolEnum::Tcp,
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            TcpStateEnum::Listen,
+        );
+        tcp.add_inode(11).add_ports(8080, 0);
+
+        let mut udp = SocketInfoModel::with_udp(
+            NetworkProtocolEnum::Udp,
+            IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+            IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+        );
+        udp.add_inode(22).add_ports(53, 0);
+
+        let sockets_by_inode = parser.build_sockets_by_inode(vec![tcp, udp]);
+
+        assert_eq!(sockets_by_inode.len(), 2);
+        assert!(sockets_by_inode.contains_key(&11));
+        assert!(sockets_by_inode.contains_key(&22));
+    }
+
+    #[test]
+    fn aggregate_process_stats_counts_socket_types_and_states() {
+        let parser = NetworkParser::new();
+        let ownership = PidSocketOwnershipModel::with_values(42, vec![100, 101, 102, 999]);
+
+        let mut tcp_established = SocketInfoModel::with_tcp(
+            NetworkProtocolEnum::Tcp,
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)),
+            TcpStateEnum::Established,
+        );
+        tcp_established.add_inode(100).add_ports(8080, 443);
+
+        let mut tcp_listen = SocketInfoModel::with_tcp(
+            NetworkProtocolEnum::Tcp,
+            IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+            IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+            TcpStateEnum::Listen,
+        );
+        tcp_listen.add_inode(101).add_ports(22, 0);
+
+        let mut udp = SocketInfoModel::with_udp(
+            NetworkProtocolEnum::Udp,
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        );
+        udp.add_inode(102).add_ports(5353, 0);
+
+        let mut sockets_by_inode = HashMap::new();
+        sockets_by_inode.insert(100, tcp_established);
+        sockets_by_inode.insert(101, tcp_listen);
+        sockets_by_inode.insert(102, udp);
+
+        let stats = parser.aggregate_process_stats(&ownership, &sockets_by_inode);
+
+        assert_eq!(stats.pid, 42);
+        assert_eq!(stats.tcp_open, 2);
+        assert_eq!(stats.tcp_established, 1);
+        assert_eq!(stats.tcp_listen, 1);
+        assert_eq!(stats.udp_open, 1);
+        assert_eq!(stats.socket_inodes, vec![100, 101, 102]);
+    }
+
+    #[test]
+    fn build_process_stats_by_pid_groups_ownership_by_pid() {
+        let parser = NetworkParser::new();
+
+        let ownership = vec![
+            PidSocketOwnershipModel::with_values(1000, vec![1, 2]),
+            PidSocketOwnershipModel::with_values(2000, vec![3]),
+        ];
+
+        let mut socket1 = SocketInfoModel::with_tcp(
+            NetworkProtocolEnum::Tcp,
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            TcpStateEnum::Established,
+        );
+        socket1.add_inode(1).add_ports(9000, 9001);
+
+        let mut socket2 = SocketInfoModel::with_tcp(
+            NetworkProtocolEnum::Tcp,
+            IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+            IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+            TcpStateEnum::Listen,
+        );
+        socket2.add_inode(2).add_ports(22, 0);
+
+        let mut socket3 = SocketInfoModel::with_udp(
+            NetworkProtocolEnum::Udp,
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+        );
+        socket3.add_inode(3).add_ports(5353, 0);
+
+        let mut sockets_by_inode = HashMap::new();
+        sockets_by_inode.insert(1, socket1);
+        sockets_by_inode.insert(2, socket2);
+        sockets_by_inode.insert(3, socket3);
+
+        let process_stats = parser.build_process_stats_by_pid(ownership, &sockets_by_inode);
+
+        assert_eq!(process_stats.len(), 2);
+
+        let pid_1000 = process_stats
+            .get(&1000)
+            .expect("pid 1000 should have process stats");
+        assert_eq!(pid_1000.tcp_open, 2);
+        assert_eq!(pid_1000.tcp_established, 1);
+        assert_eq!(pid_1000.tcp_listen, 1);
+        assert_eq!(pid_1000.udp_open, 0);
+
+        let pid_2000 = process_stats
+            .get(&2000)
+            .expect("pid 2000 should have process stats");
+        assert_eq!(pid_2000.tcp_open, 0);
+        assert_eq!(pid_2000.udp_open, 1);
     }
 }
