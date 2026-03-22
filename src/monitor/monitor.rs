@@ -77,8 +77,6 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser, NetParser: Tr
         })?;
 
         self.parser.refresh_process_snapshot(&mut self.system_state);
-        self.parser
-            .refresh_network_snapshot(&mut self.system_state)?;
         let new_jiffies = self.parser.get_process_jiffies(&self.system_state);
         let new_thread_jiffies = self.parser.get_thread_jiffies(&self.system_state);
         let total1 = self.parser.get_status_info()?.total_cpu;
@@ -101,20 +99,13 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser, NetParser: Tr
     pub fn sample_process_network_stats_map(
         &mut self,
     ) -> Result<HashMap<Pid, ProcessNetworkStatsModel>, ParseError> {
-        self.parser.refresh_process_snapshot(&mut self.system_state);
-        self.parser
-            .refresh_network_snapshot(&mut self.system_state)?;
-
-        Ok(self
-            .system_state
-            .network_snapshot
-            .process_stats_by_pid
-            .clone())
+        self.parser.network_parser.get_process_network_stats()
     }
 
     pub fn sample_process_network_stats(
         &mut self,
     ) -> Result<Vec<ProcessNetworkSampleDTO>, ParseError> {
+        self.parser.refresh_process_snapshot(&mut self.system_state);
         let stats_by_pid = self.sample_process_network_stats_map()?;
 
         let mut samples: Vec<ProcessNetworkSampleDTO> = stats_by_pid

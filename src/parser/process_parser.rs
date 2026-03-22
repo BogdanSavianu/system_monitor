@@ -99,7 +99,9 @@ impl ProcessParser {
             File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
         let mut buf_reader = BufReader::new(file);
         let mut buf = String::new();
-        let _ = buf_reader.read_to_string(&mut buf);
+        buf_reader
+            .read_to_string(&mut buf)
+            .map_err(|err| ParseError::ParsingError(err.to_string()))?;
 
         Ok(buf)
     }
