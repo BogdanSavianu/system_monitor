@@ -38,8 +38,11 @@ impl Monitor<ProcessParser, ThreadParser, NetworkParser> {
     }
 }
 
-impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser, NetParser: TraitNetworkParser>
-    Monitor<ProcParser, ThrParser, NetParser>
+impl<
+    ProcParser: TraitProcessParser + Sync,
+    ThrParser: TraitThreadParser + Sync,
+    NetParser: TraitNetworkParser,
+> Monitor<ProcParser, ThrParser, NetParser>
 {
     pub fn with_parsers(
         process_parser: ProcParser,

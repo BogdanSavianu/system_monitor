@@ -265,7 +265,10 @@ mod tests {
         state.rebuild_process_hierarchy();
 
         assert_eq!(state.process_hierarchy.pid_to_ppid.get(&2), Some(&1));
-        assert_eq!(state.process_hierarchy.children_by_pid.get(&1), Some(&vec![2, 3]));
+        assert_eq!(
+            state.process_hierarchy.children_by_pid.get(&1),
+            Some(&vec![2, 3])
+        );
         assert_eq!(state.process_hierarchy.roots, vec![1, 4]);
     }
 

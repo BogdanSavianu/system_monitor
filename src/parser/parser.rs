@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs::{File, read_dir};
 use std::io::{BufRead, BufReader};
+use std::thread;
 
 use crate::hashmap;
 use crate::model::SystemStatusFileModel;
@@ -22,8 +23,11 @@ pub struct Parser<
     pub network_parser: NetParser,
 }
 
-impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser, NetParser: TraitNetworkParser>
-    Parser<ProcParser, ThrParser, NetParser>
+impl<
+    ProcParser: TraitProcessParser + Sync,
+    ThrParser: TraitThreadParser + Sync,
+    NetParser: TraitNetworkParser,
+> Parser<ProcParser, ThrParser, NetParser>
 {
     pub fn new(
         process_parser: ProcParser,
@@ -39,7 +43,7 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser, NetParser: Tr
 
     // this DOES NOT include jiffies
     pub fn parse_all_processes(&self) -> Vec<Process> {
-        let mut processes: Vec<Process> = vec![];
+        let mut process_paths: Vec<String> = vec![];
         if let Ok(entries) = read_dir("/proc") {
             for entry in entries {
                 let Ok(entry) = entry else {
@@ -48,13 +52,43 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser, NetParser: Tr
 
                 let process_path = entry.path();
                 if process_path.is_dir() {
-                    let process_path_string = process_path.display().to_string();
-                    if let Ok(process) = self.parse_process(&process_path_string) {
-                        processes.push(process);
-                    }
+                    process_paths.push(process_path.display().to_string());
                 }
             }
         }
+
+        if process_paths.is_empty() {
+            return vec![];
+        }
+
+        let workers = Self::worker_count(process_paths.len());
+        let chunk_size = process_paths.len().div_ceil(workers);
+        let process_parser = &self.process_parser;
+
+        let mut processes: Vec<Process> = Vec::new();
+        thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for chunk in process_paths.chunks(chunk_size) {
+                handles.push(scope.spawn(move || {
+                    let mut parsed: Vec<Process> = Vec::new();
+                    for path in chunk {
+                        if let Ok(process) = process_parser.parse_process(path) {
+                            parsed.push(process);
+                        }
+                    }
+
+                    parsed
+                }));
+            }
+
+            for handle in handles {
+                if let Ok(mut partial) = handle.join() {
+                    processes.append(&mut partial);
+                }
+            }
+        });
+
+        processes.sort_by_key(|process| process.pid);
 
         processes
     }
@@ -97,19 +131,79 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser, NetParser: Tr
         system_state.clear_process_snapshot();
         let processes = self.parse_all_processes();
 
-        for process in processes {
+        if processes.is_empty() {
+            system_state.rebuild_process_hierarchy();
+            return;
+        }
+
+        let workers = Self::worker_count(processes.len());
+        let chunk_size = processes.len().div_ceil(workers);
+        let process_parser = &self.process_parser;
+        let thread_parser = &self.thread_parser;
+
+        let mut process_snapshots: Vec<(Process, Vec<crate::thread::Thread>)> = Vec::new();
+        // normally thread::spawn does not allow use of variables outside its scope
+        // but thread::scope guarantees the new thread does not outlive its creator
+        // thus allowing the use of its local variables by passing references (process and thread parsers in this case)
+        thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for chunk in processes.chunks(chunk_size) {
+                handles.push(scope.spawn(move || {
+                    let mut partial: Vec<(Process, Vec<crate::thread::Thread>)> = Vec::new();
+                    for process in chunk {
+                        let pid = process.pid;
+                        let threads = process_parser
+                            .get_threads_for_pid(pid)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|thread| thread_parser.parse_thread(pid, thread))
+                            .collect::<Vec<_>>();
+
+                        partial.push((process.clone(), threads));
+                    }
+
+                    partial
+                }));
+            }
+
+            for handle in handles {
+                if let Ok(mut partial) = handle.join() {
+                    process_snapshots.append(&mut partial);
+                }
+            }
+        });
+
+        process_snapshots.sort_by_key(|(process, _)| process.pid);
+
+        for (process, threads) in process_snapshots {
             let pid = process.pid;
             system_state.insert_process(process);
-
-            if let Ok(threads) = self.process_parser.get_threads_for_pid(pid) {
-                for thread in threads {
-                    let parsed_thread = self.thread_parser.parse_thread(pid, thread);
-                    system_state.insert_thread(parsed_thread, pid);
-                }
+            for thread in threads {
+                system_state.insert_thread(thread, pid);
             }
         }
 
         system_state.rebuild_process_hierarchy();
+    }
+
+    /// Returns how many workers to use.
+    /// It is at least 1 and at most the available CPU count.
+    ///
+    /// # Examples
+    ///
+    /// On a 4-core machine:
+    /// - total_items = 0 -> 1 worker
+    /// - total_items = 3 -> 3 workers
+    /// - total_items = 20 -> 12 workers
+    fn worker_count(total_items: usize) -> usize {
+        let available = thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+
+        let min_required_workers = 1;
+        let requested_workers = total_items.max(min_required_workers);
+
+        available.min(requested_workers)
     }
 
     pub fn initialize_cpu_sampling(
