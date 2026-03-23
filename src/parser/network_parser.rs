@@ -2,13 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{File, read_dir, read_link};
 use std::io::{BufRead, BufReader};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::thread;
 
 use crate::hashmap;
 use crate::model::{NetworkSnapshotModel, ProcessNetworkStatsModel};
 use crate::util::Inode;
 use crate::{
     model::{NetworkProtocolEnum, PidSocketOwnershipModel, SocketInfoModel, TcpStateEnum},
-    util::{ParseError, Pid},
+    util::{ParseError, Pid, worker_count},
 };
 
 const NET_TCP_PATH: &str = "/proc/net/tcp";
@@ -51,10 +52,34 @@ impl TraitNetworkParser for NetworkParser {
 
     fn get_all_net_socket_info(&self) -> Result<Vec<SocketInfoModel>, ParseError> {
         let mut all = Vec::new();
-        all.extend(self.get_net_tcp_info()?);
-        all.extend(self.get_net_tcp6_info()?);
-        all.extend(self.get_net_udp_info()?);
-        all.extend(self.get_net_udp6_info()?);
+
+        thread::scope(|scope| -> Result<(), ParseError> {
+            let tcp_handle = scope.spawn(|| self.get_net_tcp_info());
+            let tcp6_handle = scope.spawn(|| self.get_net_tcp6_info());
+            let udp_handle = scope.spawn(|| self.get_net_udp_info());
+            let udp6_handle = scope.spawn(|| self.get_net_udp6_info());
+
+            let tcp = tcp_handle
+                .join()
+                .map_err(|_| ParseError::ParsingError("tcp parser worker panicked".to_string()))??;
+            let tcp6 = tcp6_handle
+                .join()
+                .map_err(|_| ParseError::ParsingError("tcp6 parser worker panicked".to_string()))??;
+            let udp = udp_handle
+                .join()
+                .map_err(|_| ParseError::ParsingError("udp parser worker panicked".to_string()))??;
+            let udp6 = udp6_handle
+                .join()
+                .map_err(|_| ParseError::ParsingError("udp6 parser worker panicked".to_string()))??;
+
+            all.extend(tcp);
+            all.extend(tcp6);
+            all.extend(udp);
+            all.extend(udp6);
+
+            Ok(())
+        })?;
+
         Ok(all)
     }
 
@@ -90,7 +115,7 @@ impl TraitNetworkParser for NetworkParser {
 
     fn get_all_pid_socket_ownership(&self) -> Result<Vec<PidSocketOwnershipModel>, ParseError> {
         let entries = read_dir("/proc").map_err(|err| ParseError::ParsingError(err.to_string()))?;
-        let mut ownership = Vec::new();
+        let mut pids: Vec<Pid> = Vec::new();
 
         for entry in entries {
             let Ok(entry) = entry else {
@@ -110,11 +135,41 @@ impl TraitNetworkParser for NetworkParser {
                 continue;
             };
 
-            // in case process exits during scan, skip it
-            if let Ok(pid_ownership) = self.get_pid_socket_ownership(pid) {
-                ownership.push(pid_ownership);
-            }
+            pids.push(pid);
         }
+
+        if pids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let workers = worker_count(pids.len());
+        let chunk_size = pids.len().div_ceil(workers);
+
+        let mut ownership = Vec::new();
+        thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for chunk in pids.chunks(chunk_size) {
+                handles.push(scope.spawn(move || {
+                    let mut partial = Vec::new();
+                    for pid in chunk {
+                        // in case process exits during scan, skip it
+                        if let Ok(pid_ownership) = self.get_pid_socket_ownership(*pid) {
+                            partial.push(pid_ownership);
+                        }
+                    }
+
+                    partial
+                }));
+            }
+
+            for handle in handles {
+                if let Ok(mut partial) = handle.join() {
+                    ownership.append(&mut partial);
+                }
+            }
+        });
+
+        ownership.sort_by_key(|entry| entry.pid);
 
         Ok(ownership)
     }
@@ -307,16 +362,37 @@ impl NetworkParser {
         ownership: Vec<PidSocketOwnershipModel>,
         sockets_by_inode: &HashMap<Inode, SocketInfoModel>,
     ) -> HashMap<Pid, ProcessNetworkStatsModel> {
-        let mut process_stats_by_pid: HashMap<Pid, ProcessNetworkStatsModel> = hashmap![];
-
-        for pid_ownership in ownership {
-            let stats = self.aggregate_process_stats(&pid_ownership, sockets_by_inode);
-            process_stats_by_pid.insert(stats.pid, stats);
+        if ownership.is_empty() {
+            return hashmap![];
         }
+
+        let workers = worker_count(ownership.len());
+        let chunk_size = ownership.len().div_ceil(workers);
+
+        let mut process_stats_by_pid: HashMap<Pid, ProcessNetworkStatsModel> = hashmap![];
+        thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for chunk in ownership.chunks(chunk_size) {
+                handles.push(scope.spawn(move || {
+                    let mut partial: HashMap<Pid, ProcessNetworkStatsModel> = hashmap![];
+                    for pid_ownership in chunk {
+                        let stats = self.aggregate_process_stats(pid_ownership, sockets_by_inode);
+                        partial.insert(stats.pid, stats);
+                    }
+
+                    partial
+                }));
+            }
+
+            for handle in handles {
+                if let Ok(partial) = handle.join() {
+                    process_stats_by_pid.extend(partial);
+                }
+            }
+        });
 
         process_stats_by_pid
     }
-
     fn get_sockets_by_inode(&self) -> Result<HashMap<Inode, SocketInfoModel>, ParseError> {
         let sockets = self.get_all_net_socket_info()?;
         Ok(self.build_sockets_by_inode(sockets))

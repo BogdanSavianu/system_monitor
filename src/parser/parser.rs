@@ -61,7 +61,7 @@ impl<
             return vec![];
         }
 
-        let workers = Self::worker_count(process_paths.len());
+        let workers = worker_count(process_paths.len());
         let chunk_size = process_paths.len().div_ceil(workers);
         let process_parser = &self.process_parser;
 
@@ -134,7 +134,7 @@ impl<
             return;
         }
 
-        let workers = Self::worker_count(processes.len());
+        let workers = worker_count(processes.len());
         let chunk_size = processes.len().div_ceil(workers);
         let process_parser = &self.process_parser;
         let thread_parser = &self.thread_parser;
@@ -182,26 +182,6 @@ impl<
         }
 
         system_state.rebuild_process_hierarchy();
-    }
-
-    /// Returns how many workers to use.
-    /// It is at least 1 and at most the available CPU count.
-    ///
-    /// # Examples
-    ///
-    /// On a 4-core machine:
-    /// - total_items = 0 -> 1 worker
-    /// - total_items = 3 -> 3 workers
-    /// - total_items = 20 -> 12 workers
-    fn worker_count(total_items: usize) -> usize {
-        let available = thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1);
-
-        let min_required_workers = 1;
-        let requested_workers = total_items.max(min_required_workers);
-
-        available.min(requested_workers)
     }
 
     pub fn initialize_cpu_sampling(
@@ -255,7 +235,7 @@ impl<
             return hashmap![];
         }
 
-        let workers = Self::worker_count(pids.len());
+        let workers = worker_count(pids.len());
         let chunk_size = pids.len().div_ceil(workers);
         let process_parser = &self.process_parser;
 
@@ -299,7 +279,7 @@ impl<
             return hashmap![];
         }
 
-        let workers = Self::worker_count(thread_pairs.len());
+        let workers = worker_count(thread_pairs.len());
         let chunk_size = thread_pairs.len().div_ceil(workers);
         let thread_parser = &self.thread_parser;
 
