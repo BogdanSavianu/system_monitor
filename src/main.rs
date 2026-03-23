@@ -1,14 +1,16 @@
 use std::{env, thread::sleep, time::Duration};
 
 use system_monitor::{
+    dto::ProcessHierarchyNodeDTO,
     monitor::Monitor,
     parser::{NetworkParser, ProcessParser, ThreadParser},
     util::ParseError,
 };
 
-fn parse_args() -> Result<(bool, bool, Option<u32>), ParseError> {
+fn parse_args() -> Result<(bool, bool, bool, Option<u32>), ParseError> {
     let mut show_threads = false;
     let mut show_network = false;
+    let mut show_hierarchy = false;
     let mut pid_filter: Option<u32> = None;
 
     for arg in env::args().skip(1) {
@@ -19,6 +21,11 @@ fn parse_args() -> Result<(bool, bool, Option<u32>), ParseError> {
 
         if arg == "-network" || arg == "--network" {
             show_network = true;
+            continue;
+        }
+
+        if arg == "-hierarchy" || arg == "--hierarchy" {
+            show_hierarchy = true;
             continue;
         }
 
@@ -34,21 +41,43 @@ fn parse_args() -> Result<(bool, bool, Option<u32>), ParseError> {
         }
 
         return Err(ParseError::ParsingError(format!(
-            "unknown argument '{}'. supported: -threads, -network, -pid=<pid>",
+            "unknown argument '{}'. supported: -threads, -network, -hierarchy, -pid=<pid>",
             arg
         )));
     }
 
-    Ok((show_threads, show_network, pid_filter))
+    Ok((show_threads, show_network, show_hierarchy, pid_filter))
+}
+
+fn print_tree_nodes(nodes: &[ProcessHierarchyNodeDTO], depth: usize) {
+    let indent = "  ".repeat(depth);
+    for node in nodes {
+        println!(
+            "{}pid={} ppid={} name={}",
+            indent, node.pid, node.ppid, node.name
+        );
+        print_tree_nodes(&node.children, depth + 1);
+    }
 }
 
 fn print_samples(
     monitor: &mut Monitor<ProcessParser, ThreadParser, NetworkParser>,
     show_threads: bool,
     show_network: bool,
+    show_hierarchy: bool,
     pid_filter: Option<u32>,
 ) -> Result<(), ParseError> {
-    if show_network {
+    if show_hierarchy {
+        let hierarchy_index = monitor.sample_process_hierarchy_indexes()?;
+        println!("process_hierarchy_indexes");
+        println!("roots={:?}", hierarchy_index.roots);
+        println!("pid_to_ppid={:?}", hierarchy_index.pid_to_ppid);
+        println!("children_by_pid={:?}", hierarchy_index.children_by_pid);
+
+        let hierarchy_tree = monitor.sample_process_hierarchy_tree()?;
+        println!("process_hierarchy_tree");
+        print_tree_nodes(&hierarchy_tree, 0);
+    } else if show_network {
         let network_samples = monitor.sample_process_network_stats()?;
 
         for sample in network_samples
@@ -111,7 +140,7 @@ fn print_samples(
 }
 
 fn main() -> Result<(), ParseError> {
-    let (show_threads, show_network, pid_filter) = parse_args()?;
+    let (show_threads, show_network, show_hierarchy, pid_filter) = parse_args()?;
 
     let process_parser = ProcessParser::new();
     let thread_parser = ThreadParser::new();
@@ -121,10 +150,18 @@ fn main() -> Result<(), ParseError> {
     // t0
     monitor.initialize_sampling()?;
 
-    sleep(Duration::from_millis(2000));
+    if !show_hierarchy {
+        sleep(Duration::from_millis(2000));
+    }
 
     // t1
-    print_samples(&mut monitor, show_threads, show_network, pid_filter)?;
+    print_samples(
+        &mut monitor,
+        show_threads,
+        show_network,
+        show_hierarchy,
+        pid_filter,
+    )?;
 
     //println!("{:#?}", system_state);
     //println!("{:#?}", parser.get_status_info());
