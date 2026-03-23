@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
 use crate::{
-    dto::{ProcessCpuSampleDTO, ProcessNetworkSampleDTO, ThreadCpuSampleDTO},
-    model::ProcessNetworkStatsModel,
+    dto::{
+        ProcessCpuSampleDTO, ProcessHierarchyIndexDTO, ProcessHierarchyNodeDTO,
+        ProcessNetworkSampleDTO, ThreadCpuSampleDTO,
+    },
+    model::{ProcessHierarchyModel, ProcessNetworkStatsModel},
     parser::{
         NetworkParser, Parser, ProcessParser, ThreadParser, network_parser::TraitNetworkParser,
         parser::TraitProcessParser, thread_parser::TraitThreadParser,
@@ -129,6 +132,55 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser, NetParser: Tr
         });
 
         Ok(samples)
+    }
+
+    pub fn sample_process_hierarchy_indexes(
+        &mut self,
+    ) -> Result<ProcessHierarchyIndexDTO, ParseError> {
+        self.parser.refresh_process_snapshot(&mut self.system_state);
+        let hierarchy = &self.system_state.process_hierarchy;
+
+        Ok(ProcessHierarchyIndexDTO::with_values(
+            hierarchy.pid_to_ppid.clone(),
+            hierarchy.children_by_pid.clone(),
+            hierarchy.roots.clone(),
+        ))
+    }
+
+    pub fn sample_process_hierarchy_tree(
+        &mut self,
+    ) -> Result<Vec<ProcessHierarchyNodeDTO>, ParseError> {
+        self.parser.refresh_process_snapshot(&mut self.system_state);
+
+        let mut roots = Vec::new();
+        for root_pid in &self.system_state.process_hierarchy.roots {
+            roots.push(self.build_hierarchy_node(*root_pid));
+        }
+
+        Ok(roots)
+    }
+
+    fn build_hierarchy_node(&self, pid: Pid) -> ProcessHierarchyNodeDTO {
+        let hierarchy: &ProcessHierarchyModel = &self.system_state.process_hierarchy;
+        let children_pids = hierarchy
+            .children_by_pid
+            .get(&pid)
+            .cloned()
+            .unwrap_or_default();
+
+        let children = children_pids
+            .into_iter()
+            .map(|child_pid| self.build_hierarchy_node(child_pid))
+            .collect();
+
+        let ppid = hierarchy.pid_to_ppid.get(&pid).copied().unwrap_or(0);
+        let name = self
+            .system_state
+            .get_process(pid)
+            .map(|process| process.name.clone())
+            .unwrap_or_default();
+
+        ProcessHierarchyNodeDTO::with_values(pid, ppid, name, children)
     }
 
     // adapter method that turns the HashMap into a more serializable Vec

@@ -6,6 +6,7 @@ use crate::util::types::*;
 #[derive(Debug, Clone)]
 pub struct Process {
     pub pid: Pid,
+    pub ppid: Pid,
     pub name: String,
     pub cmdline: String,
     // Pm, Vm and Swap are both in KB
@@ -19,6 +20,7 @@ impl Process {
     pub fn new(pid: Pid) -> Self {
         Process {
             pid,
+            ppid: 0,
             name: "".into(),
             cmdline: "".into(),
             physical_mem: 0,
@@ -34,6 +36,7 @@ impl Display for Process {
         write!(
             f,
             "Process id: {:?},
+            Parent id: {:?},
     Name: {:?},
     CmdLine: {:?},
     Thread Count: {:?},
@@ -41,6 +44,7 @@ impl Display for Process {
     Physical Memory: {:?},
     Swap Memory: {:?}",
             self.pid,
+            self.ppid,
             self.name,
             self.cmdline,
             self.thread_count,

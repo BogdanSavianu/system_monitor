@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     hashmap,
-    model::{CpuUsageResultModel, JiffyUsageModel, NetworkSnapshotModel},
+    model::{CpuUsageResultModel, JiffyUsageModel, NetworkSnapshotModel, ProcessHierarchyModel},
     process::Process,
     thread::Thread,
     util::types::*,
@@ -14,6 +14,7 @@ pub struct SystemState {
     pub processes: HashMap<Pid, Process>,
     pub threads: HashMap<Tid, Thread>,
     pub threads_by_pid: HashMap<Pid, Vec<Tid>>,
+    pub process_hierarchy: ProcessHierarchyModel,
     pub network_snapshot: NetworkSnapshotModel,
     pub jiffy_usage: JiffyUsageModel,
 }
@@ -25,6 +26,7 @@ impl SystemState {
             processes: hashmap![],
             threads: hashmap![],
             threads_by_pid: hashmap![],
+            process_hierarchy: ProcessHierarchyModel::new(),
             network_snapshot: NetworkSnapshotModel::new(),
             jiffy_usage: JiffyUsageModel::new(),
         }
@@ -73,6 +75,11 @@ impl SystemState {
         self.processes.clear();
         self.threads.clear();
         self.threads_by_pid.clear();
+        self.process_hierarchy = ProcessHierarchyModel::new();
+    }
+
+    pub fn rebuild_process_hierarchy(&mut self) {
+        self.process_hierarchy = ProcessHierarchyModel::build(&self.processes);
     }
 
     pub fn add_jiffies_for_pid(&mut self, pid: Pid, jiffies: u64) {
@@ -164,6 +171,8 @@ impl SystemState {
 mod tests {
     use std::collections::HashMap;
 
+    use crate::process::Process;
+
     use super::SystemState;
 
     #[test]
@@ -231,5 +240,50 @@ mod tests {
         let relative = state.calculate_relative_cpu_usage(&usages, 50.0);
         assert_eq!(relative.get(&1_u32).copied(), Some(40.0));
         assert_eq!(relative.get(&2_u32).copied(), Some(60.0));
+    }
+
+    #[test]
+    fn rebuild_process_hierarchy_creates_sorted_indexes() {
+        let mut state = SystemState::new();
+
+        let mut p1 = Process::new(1);
+        p1.ppid = 0;
+        state.insert_process(p1);
+
+        let mut p2 = Process::new(2);
+        p2.ppid = 1;
+        state.insert_process(p2);
+
+        let mut p3 = Process::new(3);
+        p3.ppid = 1;
+        state.insert_process(p3);
+
+        let mut p4 = Process::new(4);
+        p4.ppid = 999;
+        state.insert_process(p4);
+
+        state.rebuild_process_hierarchy();
+
+        assert_eq!(state.process_hierarchy.pid_to_ppid.get(&2), Some(&1));
+        assert_eq!(state.process_hierarchy.children_by_pid.get(&1), Some(&vec![2, 3]));
+        assert_eq!(state.process_hierarchy.roots, vec![1, 4]);
+    }
+
+    #[test]
+    fn clear_process_snapshot_resets_hierarchy() {
+        let mut state = SystemState::new();
+
+        let mut process = Process::new(10);
+        process.ppid = 0;
+        state.insert_process(process);
+        state.rebuild_process_hierarchy();
+
+        assert!(!state.process_hierarchy.roots.is_empty());
+
+        state.clear_process_snapshot();
+
+        assert!(state.process_hierarchy.roots.is_empty());
+        assert!(state.process_hierarchy.pid_to_ppid.is_empty());
+        assert!(state.process_hierarchy.children_by_pid.is_empty());
     }
 }

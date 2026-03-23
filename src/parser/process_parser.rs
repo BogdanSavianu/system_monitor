@@ -14,8 +14,15 @@ pub trait TraitProcessParser {
     fn get_status_info(&self, pid: Pid) -> Result<ProcessStatusFileModel, ParseError>;
     // for now it returns utime and stime used for jiffies
     fn get_stat_info(&self, pid: Pid) -> Result<(u64, u64), ParseError>;
+    fn get_parent_pid(&self, pid: Pid) -> Result<Pid, ParseError>;
     fn get_process_name(&self, pid: Pid) -> Result<String, ParseError>;
     fn get_process_cmdline(&self, pid: Pid) -> Result<String, ParseError>;
+}
+
+struct ProcessStatInfo {
+    ppid: Pid,
+    utime: u64,
+    stime: u64,
 }
 
 pub struct ProcessParser;
@@ -106,7 +113,7 @@ impl ProcessParser {
         Ok(buf)
     }
 
-    fn parse_stat_info<R>(&self, mut buf_reader: R) -> Result<(u64, u64), ParseError>
+    fn parse_stat_info<R>(&self, mut buf_reader: R) -> Result<ProcessStatInfo, ParseError>
     where
         R: BufRead,
     {
@@ -139,16 +146,20 @@ impl ProcessParser {
             ));
         }
 
-        // skip state and ppid
+        // starts from state, ppid is the next field
         let after_comm = &content[(comm_end + 2)..];
         let fields: Vec<&str> = after_comm.split_whitespace().collect();
 
-        // relative to field 3: field14(utime) => idx 11, field15(stime) => idx 12
+        // relative to field 3: ppid is idx 1, field14(utime) is idx 11, field15(stime) is idx 12
         if fields.len() <= 12 {
             return Err(ParseError::ParsingError(
                 "Stat file has too few fields".to_string(),
             ));
         }
+
+        let ppid = fields[1]
+            .parse::<Pid>()
+            .map_err(|err| ParseError::ParsingError(err.to_string()))?;
 
         let utime = fields[11]
             .parse::<u64>()
@@ -157,7 +168,7 @@ impl ProcessParser {
             .parse::<u64>()
             .map_err(|err| ParseError::ParsingError(err.to_string()))?;
 
-        Ok((utime, stime))
+        Ok(ProcessStatInfo { ppid, utime, stime })
     }
 
     fn normalize_cmdline(&self, s: &String) -> String {
@@ -180,10 +191,12 @@ impl TraitProcessParser for ProcessParser {
     fn parse_process(&self, file_path: &String) -> Result<Process, ParseError> {
         let pid = extract_pid_from_path(file_path)?;
         let mut process = Process::new(pid);
+        let ppid = self.get_parent_pid(pid)?;
         let name = self.get_process_name(pid)?;
         let cmdline = self.get_process_cmdline(pid)?;
         let status_file_model = self.get_status_info(pid)?;
 
+        process.ppid = ppid;
         process.name = name;
         process.cmdline = cmdline;
         process.virtual_mem = status_file_model.virtual_mem;
@@ -229,7 +242,19 @@ impl TraitProcessParser for ProcessParser {
         let file =
             File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
         let buf_reader = BufReader::new(file);
-        self.parse_stat_info(buf_reader)
+        let stat_info = self.parse_stat_info(buf_reader)?;
+
+        Ok((stat_info.utime, stat_info.stime))
+    }
+
+    fn get_parent_pid(&self, pid: Pid) -> Result<Pid, ParseError> {
+        let file_path = format!("{BASE_PROC_PATH}/{pid}/stat");
+        let file =
+            File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let buf_reader = BufReader::new(file);
+        let stat_info = self.parse_stat_info(buf_reader)?;
+
+        Ok(stat_info.ppid)
     }
 
     fn get_process_name(&self, pid: Pid) -> Result<String, ParseError> {
@@ -285,12 +310,13 @@ mod tests {
         // fields after ") " begin at field 3 (state); utime/stime are relative indices 11 and 12.
         let input = "1234 (my process) R 1 2 3 4 5 6 7 8 9 10 11 42 84 15 16";
 
-        let (utime, stime) = parser
+        let stat_info = parser
             .parse_stat_info(Cursor::new(input))
             .expect("stat info should parse");
 
-        assert_eq!(utime, 11);
-        assert_eq!(stime, 42);
+        assert_eq!(stat_info.ppid, 1);
+        assert_eq!(stat_info.utime, 11);
+        assert_eq!(stat_info.stime, 42);
     }
 
     #[test]

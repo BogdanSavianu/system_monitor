@@ -108,6 +108,8 @@ impl<ProcParser: TraitProcessParser, ThrParser: TraitThreadParser, NetParser: Tr
                 }
             }
         }
+
+        system_state.rebuild_process_hierarchy();
     }
 
     pub fn initialize_cpu_sampling(
@@ -275,6 +277,12 @@ mod tests {
         }
 
         fn get_process_name(&self, _pid: Pid) -> Result<String, ParseError> {
+            Err(ParseError::ParsingError(
+                "not used in this test".to_string(),
+            ))
+        }
+
+        fn get_parent_pid(&self, _pid: Pid) -> Result<Pid, ParseError> {
             Err(ParseError::ParsingError(
                 "not used in this test".to_string(),
             ))
