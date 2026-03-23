@@ -255,15 +255,46 @@ impl<
     }
 
     pub fn get_thread_jiffies(&self, system_state: &SystemState) -> HashMap<Tid, u64> {
-        let mut jiffies: HashMap<Tid, u64> = hashmap![];
-
+        let mut thread_pairs: Vec<(Pid, Tid)> = Vec::new();
         for (pid, tids) in system_state.threads_by_pid.iter() {
             for tid in tids {
-                if let Ok((utime, stime)) = self.thread_parser.get_thread_stat_info(*pid, *tid) {
-                    jiffies.insert(*tid, utime + stime);
-                }
+                thread_pairs.push((*pid, *tid));
             }
         }
+
+        if thread_pairs.is_empty() {
+            return hashmap![];
+        }
+
+        let workers = Self::worker_count(thread_pairs.len());
+        let chunk_size = thread_pairs.len().div_ceil(workers);
+        let thread_parser = &self.thread_parser;
+
+        let mut jiffies: HashMap<Tid, u64> = hashmap![];
+        thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for chunk in thread_pairs.chunks(chunk_size) {
+                handles.push(scope.spawn(move || {
+                    let mut partial: Vec<(Tid, u64)> = Vec::new();
+                    for (pid, tid) in chunk {
+                        if let Ok((utime, stime)) = thread_parser.get_thread_stat_info(*pid, *tid)
+                        {
+                            partial.push((*tid, utime + stime));
+                        }
+                    }
+
+                    partial
+                }));
+            }
+
+            for handle in handles {
+                if let Ok(partial) = handle.join() {
+                    for (tid, jiffy) in partial {
+                        jiffies.insert(tid, jiffy);
+                    }
+                }
+            }
+        });
 
         jiffies
     }
