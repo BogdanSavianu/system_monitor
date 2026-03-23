@@ -95,7 +95,7 @@ impl<
 
     // obviously this ONLY includes jiffies
     pub fn parse_all_process_jiffies(&self) -> HashMap<Pid, u64> {
-        let mut jiffies: HashMap<Pid, u64> = hashmap![];
+        let mut pids: Vec<Pid> = Vec::new();
         if let Ok(entries) = read_dir("/proc") {
             for entry in entries {
                 let Ok(entry) = entry else {
@@ -113,14 +113,12 @@ impl<
                         continue;
                     };
 
-                    if let Ok((utime, stime)) = self.process_parser.get_stat_info(pid) {
-                        jiffies.insert(pid, utime + stime);
-                    }
+                    pids.push(pid);
                 }
             }
         }
 
-        jiffies
+        self.collect_process_jiffies(&pids)
     }
 
     pub fn parse_process(&self, file_path: &String) -> Result<Process, ParseError> {
@@ -244,12 +242,47 @@ impl<
     }
 
     pub fn get_process_jiffies(&self, system_state: &SystemState) -> HashMap<Pid, u64> {
-        let mut jiffies: HashMap<Pid, u64> = hashmap![];
-        for p in system_state.processes.values() {
-            if let Ok((utime, stime)) = self.process_parser.get_stat_info(p.pid) {
-                jiffies.insert(p.pid, utime + stime);
-            }
+        let mut pids: Vec<Pid> = Vec::new();
+        for process in system_state.processes.values() {
+            pids.push(process.pid);
         }
+
+        self.collect_process_jiffies(&pids)
+    }
+
+    fn collect_process_jiffies(&self, pids: &[Pid]) -> HashMap<Pid, u64> {
+        if pids.is_empty() {
+            return hashmap![];
+        }
+
+        let workers = Self::worker_count(pids.len());
+        let chunk_size = pids.len().div_ceil(workers);
+        let process_parser = &self.process_parser;
+
+        let mut jiffies: HashMap<Pid, u64> = hashmap![];
+        thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for chunk in pids.chunks(chunk_size) {
+                handles.push(scope.spawn(move || {
+                    let mut partial: Vec<(Pid, u64)> = Vec::new();
+                    for pid in chunk {
+                        if let Ok((utime, stime)) = process_parser.get_stat_info(*pid) {
+                            partial.push((*pid, utime + stime));
+                        }
+                    }
+
+                    partial
+                }));
+            }
+
+            for handle in handles {
+                if let Ok(partial) = handle.join() {
+                    for (pid, jiffy) in partial {
+                        jiffies.insert(pid, jiffy);
+                    }
+                }
+            }
+        });
 
         jiffies
     }
@@ -277,8 +310,7 @@ impl<
                 handles.push(scope.spawn(move || {
                     let mut partial: Vec<(Tid, u64)> = Vec::new();
                     for (pid, tid) in chunk {
-                        if let Ok((utime, stime)) = thread_parser.get_thread_stat_info(*pid, *tid)
-                        {
+                        if let Ok((utime, stime)) = thread_parser.get_thread_stat_info(*pid, *tid) {
                             partial.push((*tid, utime + stime));
                         }
                     }
