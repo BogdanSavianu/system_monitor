@@ -1,0 +1,37 @@
+2026-03-23T18:16:42.048097Z  INFO system_monitor::app: starting in worker mode
+2026-03-23T18:16:42.048202Z  INFO system_monitor::parser::parser: initializing cpu sampling
+2026-03-23T18:16:42.103512Z  INFO system_monitor::monitor::monitor: monitor sampling initialized processes=161 threads=900 cores=4
+2026-03-23T18:16:42.103548Z  INFO system_monitor::app::worker: worker initialized and waiting for commands
+2026-03-23T18:19:47.842921Z  INFO app::runtime: starting in worker mode
+2026-03-23T18:19:47.843018Z  INFO system_monitor::parser::parser: initializing cpu sampling
+2026-03-23T18:19:47.903261Z  INFO system_monitor::monitor::monitor: monitor sampling initialized processes=158 threads=898 cores=4
+2026-03-23T18:19:47.903303Z  INFO app::worker: worker initialized and waiting for commands
+2026-03-23T18:19:55.013524Z  INFO app::worker: command received from stdin raw_command="\u{1b}[A\u{1b}[Bhierarchy"
+2026-03-23T18:19:55.013570Z  INFO app::worker: invalid command ignored error=ParsingError("unknown command '\u{1b}[A\u{1b}[Bhierarchy'. supported: cpu, threads, network, hierarchy, quit")
+2026-03-23T18:20:02.616403Z  INFO app::worker: command received from stdin raw_command="hierarchy"
+2026-03-23T18:20:02.616479Z  INFO app::worker: worker received command command="hierarchy" pid_filter=None
+2026-03-23T18:20:21.506918Z  INFO app::worker: command received from stdin raw_command="threads"
+2026-03-23T18:20:21.506981Z  INFO app::worker: worker received command command="threads" pid_filter=None
+2026-03-23T18:22:31.636022Z  INFO app::worker: command received from stdin raw_command="quit"
+2026-03-23T18:22:31.636278Z  INFO app::worker: worker received command command="shutdown" pid_filter=None
+2026-03-23T18:22:31.636310Z  INFO app::worker: worker shutdown requested
+2026-03-23T18:39:46.197993Z  INFO app::runtime: starting in worker mode
+2026-03-23T18:39:46.198115Z  INFO parser::core: initializing cpu sampling
+2026-03-23T18:39:46.270073Z  INFO monitor::sampling: monitor sampling initialized processes=164 threads=905 cores=4
+2026-03-23T18:39:46.270109Z  INFO app::worker: worker initialized and waiting for commands
+2026-03-23T18:40:02.047012Z  INFO app::runtime: starting in worker mode
+2026-03-23T18:40:02.047103Z  INFO parser::core: initializing cpu sampling
+2026-03-23T18:40:02.115658Z  INFO monitor::sampling: monitor sampling initialized processes=161 threads=902 cores=4
+2026-03-23T18:40:02.115690Z  INFO app::worker: worker initialized and waiting for commands
+2026-03-23T18:40:22.796999Z  INFO app::worker: command received from stdin raw_command="hierarchy"
+2026-03-23T18:40:22.797075Z  INFO app::worker: worker received command command="hierarchy" pid_filter=None
+2026-03-23T18:41:12.797281Z  INFO app::runtime: starting in worker mode
+2026-03-23T18:41:12.797392Z  INFO parser::core: initializing cpu sampling
+2026-03-23T18:41:12.859306Z  INFO monitor::sampling: monitor sampling initialized processes=164 threads=907 cores=4
+2026-03-23T18:41:12.859339Z  INFO app::worker: worker initialized and waiting for commands
+2026-03-23T18:41:18.526670Z  INFO app::worker: command received from stdin raw_command="cpu"
+2026-03-23T18:41:18.526739Z  INFO app::worker: worker received command command="cpu" pid_filter=None
+2026-03-23T18:42:40.737384Z  INFO app::worker: command received from stdin raw_command="net"
+2026-03-23T18:42:40.737488Z  INFO app::worker: invalid command ignored error=ParsingError("unknown command 'net'. supported: cpu, threads, network, hierarchy, quit")
+2026-03-23T18:42:47.388659Z  INFO app::worker: command received from stdin raw_command="network"
+2026-03-23T18:42:47.388731Z  INFO app::worker: worker received command command="network" pid_filter=None

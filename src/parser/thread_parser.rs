@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
+use tracing::debug;
 
 use crate::model::ThreadStatInfoModel;
 use crate::thread::Thread;
@@ -193,6 +194,8 @@ impl TraitThreadParser for ThreadParser {
         if let Ok(file) = File::open(io_path) {
             let _ = self.parse_io_info(BufReader::new(file), &mut thread);
         }
+
+        debug!(target: "parser::thread", pid, tid, name = thread.name, "parsed thread details");
 
         thread
     }

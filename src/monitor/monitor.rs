@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use tracing::{debug, info};
 
 use crate::{
     dto::{
@@ -62,6 +63,14 @@ impl<
             .initialize_cpu_sampling(&mut self.system_state)?;
         self.previous_total_cpu = Some(total0);
 
+        info!(
+            target: "monitor::sampling",
+            processes = self.system_state.processes.len(),
+            threads = self.system_state.threads.len(),
+            cores = self.system_state.num_cores,
+            "monitor sampling initialized"
+        );
+
         Ok(())
     }
 
@@ -99,6 +108,14 @@ impl<
             .set_total_proc_cpu_percentage(process_cpu_usage.total_proc_cpu_usage);
         self.previous_total_cpu = Some(total1);
 
+        debug!(
+            target: "monitor::sampling",
+            process_count = process_cpu_usage.usages_norm.len(),
+            thread_count = thread_cpu_usage.len(),
+            total_proc_cpu = process_cpu_usage.total_proc_cpu_usage,
+            "sampled cpu usage maps"
+        );
+
         Ok((process_cpu_usage.usages_norm, thread_cpu_usage))
     }
 
@@ -134,6 +151,8 @@ impl<
                 .then_with(|| b.udp_open.cmp(&a.udp_open))
         });
 
+        debug!(target: "monitor::sampling", sample_count = samples.len(), "sampled process network stats");
+
         Ok(samples)
     }
 
@@ -159,6 +178,8 @@ impl<
         for root_pid in &self.system_state.process_hierarchy.roots {
             roots.push(self.build_hierarchy_node(*root_pid));
         }
+
+        debug!(target: "monitor::sampling", root_count = roots.len(), "sampled process hierarchy tree");
 
         Ok(roots)
     }

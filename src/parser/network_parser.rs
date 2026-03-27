@@ -3,6 +3,7 @@ use std::fs::{File, read_dir, read_link};
 use std::io::{BufRead, BufReader};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::thread;
+use tracing::{debug, warn};
 
 use crate::hashmap;
 use crate::model::{NetworkSnapshotModel, ProcessNetworkStatsModel};
@@ -59,18 +60,18 @@ impl TraitNetworkParser for NetworkParser {
             let udp_handle = scope.spawn(|| self.get_net_udp_info());
             let udp6_handle = scope.spawn(|| self.get_net_udp6_info());
 
-            let tcp = tcp_handle
-                .join()
-                .map_err(|_| ParseError::ParsingError("tcp parser worker panicked".to_string()))??;
-            let tcp6 = tcp6_handle
-                .join()
-                .map_err(|_| ParseError::ParsingError("tcp6 parser worker panicked".to_string()))??;
-            let udp = udp_handle
-                .join()
-                .map_err(|_| ParseError::ParsingError("udp parser worker panicked".to_string()))??;
-            let udp6 = udp6_handle
-                .join()
-                .map_err(|_| ParseError::ParsingError("udp6 parser worker panicked".to_string()))??;
+            let tcp = tcp_handle.join().map_err(|_| {
+                ParseError::ParsingError("tcp parser worker panicked".to_string())
+            })??;
+            let tcp6 = tcp6_handle.join().map_err(|_| {
+                ParseError::ParsingError("tcp6 parser worker panicked".to_string())
+            })??;
+            let udp = udp_handle.join().map_err(|_| {
+                ParseError::ParsingError("udp parser worker panicked".to_string())
+            })??;
+            let udp6 = udp6_handle.join().map_err(|_| {
+                ParseError::ParsingError("udp6 parser worker panicked".to_string())
+            })??;
 
             all.extend(tcp);
             all.extend(tcp6);
@@ -79,6 +80,8 @@ impl TraitNetworkParser for NetworkParser {
 
             Ok(())
         })?;
+
+        debug!(target: "parser::network", socket_count = all.len(), "collected all socket tables");
 
         Ok(all)
     }
@@ -170,6 +173,11 @@ impl TraitNetworkParser for NetworkParser {
         });
 
         ownership.sort_by_key(|entry| entry.pid);
+        debug!(
+            target: "parser::network",
+            process_count = ownership.len(),
+            "collected pid socket ownership map"
+        );
 
         Ok(ownership)
     }
@@ -178,7 +186,15 @@ impl TraitNetworkParser for NetworkParser {
         &self,
     ) -> Result<HashMap<Pid, ProcessNetworkStatsModel>, ParseError> {
         let sockets_by_inode = self.get_sockets_by_inode()?;
-        self.get_process_stats_for_sockets(&sockets_by_inode)
+        let stats = self.get_process_stats_for_sockets(&sockets_by_inode)?;
+        debug!(
+            target: "parser::network",
+            sockets = sockets_by_inode.len(),
+            processes = stats.len(),
+            "built process network stats"
+        );
+
+        Ok(stats)
     }
 
     fn get_network_snapshot(&self) -> Result<NetworkSnapshotModel, ParseError> {
@@ -202,7 +218,10 @@ impl NetworkParser {
         path: &str,
         protocol: NetworkProtocolEnum,
     ) -> Result<Vec<SocketInfoModel>, ParseError> {
-        let file = File::open(path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let file = File::open(path).map_err(|err| {
+            warn!(target: "parser::network", %path, "failed to open socket table file: {}", err);
+            ParseError::ParsingError(err.to_string())
+        })?;
         let reader = BufReader::new(file);
         self.parse_socket_table(reader, protocol)
     }

@@ -1,4 +1,5 @@
 use std::fs;
+use tracing::{debug, info, warn};
 
 use crate::util::{Pid, ProcessControlError, ProcessControlOperation};
 
@@ -23,12 +24,14 @@ impl ProcessControlService {
 
     fn validate_pid(&self, pid: Pid) -> Result<(), ProcessControlError> {
         if pid == 0 {
+            warn!(target: "process::control", pid, "refusing process control operation for pid 0");
             return Err(ProcessControlError::InvalidPid(pid));
         }
 
         // check for existence before terminating process
         let proc_path = format!("/proc/{}", pid);
         if fs::metadata(proc_path).is_err() {
+            warn!(target: "process::control", pid, "process not found for control operation");
             return Err(ProcessControlError::ProcessNotFound(pid));
         }
 
@@ -52,12 +55,16 @@ impl ProcessControlService {
     ) -> Result<ProcessControlResult, ProcessControlError> {
         self.validate_pid(pid)?;
         let signal = self.signal_for_operation(operation)?;
+        debug!(target: "process::control", pid, signal, ?operation, "sending signal to process");
 
         let rc = unsafe { libc::kill(pid as i32, signal) };
         if rc != 0 {
             let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(-1);
+            warn!(target: "process::control", pid, signal, ?operation, errno, "failed to signal process");
             return Err(ProcessControlError::from_errno(pid, operation, errno));
         }
+
+        info!(target: "process::control", pid, signal, ?operation, "process signal sent successfully");
 
         Ok(ProcessControlResult {
             pid,

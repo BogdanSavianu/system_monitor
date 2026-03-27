@@ -1,4 +1,3 @@
-pub mod collections;
 pub mod dto;
 pub mod model;
 pub mod monitor;

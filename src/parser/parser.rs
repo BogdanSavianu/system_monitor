@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs::{File, read_dir};
 use std::io::{BufRead, BufReader};
 use std::thread;
+use tracing::{debug, info, warn};
 
 use crate::hashmap;
 use crate::model::SystemStatusFileModel;
@@ -55,9 +56,12 @@ impl<
                     process_paths.push(process_path.display().to_string());
                 }
             }
+        } else {
+            warn!(target: "parser::core", "failed to read /proc while parsing processes");
         }
 
         if process_paths.is_empty() {
+            debug!(target: "parser::core", "no process paths found in /proc");
             return vec![];
         }
 
@@ -89,6 +93,12 @@ impl<
         });
 
         processes.sort_by_key(|process| process.pid);
+        debug!(
+            target: "parser::core",
+            process_count = processes.len(),
+            workers,
+            "parsed process snapshot"
+        );
 
         processes
     }
@@ -182,12 +192,19 @@ impl<
         }
 
         system_state.rebuild_process_hierarchy();
+        debug!(
+            target: "parser::core",
+            process_count = system_state.processes.len(),
+            thread_count = system_state.threads.len(),
+            "refreshed process snapshot"
+        );
     }
 
     pub fn initialize_cpu_sampling(
         &self,
         system_state: &mut SystemState,
     ) -> Result<u64, ParseError> {
+        info!(target: "parser::core", "initializing cpu sampling");
         self.refresh_process_snapshot(system_state);
         self.refresh_network_snapshot(system_state)?;
 
@@ -200,6 +217,14 @@ impl<
         let prev_thread_jiffies = self.get_thread_jiffies(system_state);
         system_state.update_thread_jiffies(prev_thread_jiffies);
 
+        debug!(
+            target: "parser::core",
+            processes = system_state.processes.len(),
+            threads = system_state.threads.len(),
+            cores = system_state.num_cores,
+            "initialized cpu sampling state"
+        );
+
         Ok(sys0.total_cpu)
     }
 
@@ -208,6 +233,12 @@ impl<
         system_state: &mut SystemState,
     ) -> Result<(), ParseError> {
         let network_snapshot = self.network_parser.get_network_snapshot()?;
+        debug!(
+            target: "parser::core",
+            sockets = network_snapshot.sockets_by_inode.len(),
+            processes = network_snapshot.process_stats_by_pid.len(),
+            "refreshed network snapshot"
+        );
         system_state.update_network_snapshot(network_snapshot);
 
         Ok(())

@@ -1,5 +1,6 @@
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read};
+use tracing::debug;
 
 use crate::model::ProcessStatusFileModel;
 use crate::process::Process;
@@ -204,6 +205,8 @@ impl TraitProcessParser for ProcessParser {
         process.swap_mem = status_file_model.swap_mem;
         process.thread_count = status_file_model.thread_count;
 
+        debug!(target: "parser::process", pid, name = process.name, "parsed process metadata");
+
         Ok(process)
     }
 
@@ -219,6 +222,8 @@ impl TraitProcessParser for ProcessParser {
             };
 
             let thread_path = entry.path();
+
+            debug!(target: "parser::process", pid, thread_count = threads.len(), "enumerated process threads");
             if thread_path.is_dir() {
                 let thr_path_str = thread_path.display().to_string();
                 let tid = extract_tid_from_path(&thr_path_str)?;
