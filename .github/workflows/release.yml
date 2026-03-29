@@ -17,15 +17,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
-      - name: Build release binary
-        run: cargo build --release --locked
-      - name: Prepare asset
-        run: cp "target/release/system-monitor" "system-monitor-linux-amd64"
+      - name: Build and package release artifact
+        run: make release-package
       - name: Upload release asset artifact
         uses: actions/upload-artifact@v4
         with:
-          name: system-monitor-linux-amd64
-          path: system-monitor-linux-amd64
+          name: release-assets
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
 
   publish:
     needs: build

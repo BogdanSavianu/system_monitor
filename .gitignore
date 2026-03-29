@@ -1,4 +1,7 @@
 /target
+/dist
 /.vscode
+/src/app/dioxus_demo/*
 output.txt
 notes.md
+dioxus-setup.md

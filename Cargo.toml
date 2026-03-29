@@ -9,3 +9,14 @@ libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
+egui = "0.29"
+eframe = "0.29"
+dioxus = { version = "0.7", optional = true, features = ["desktop"] }
+dioxus-desktop = { version = "0.7", optional = true }
+native-tls = { version = "0.2", optional = true, features = ["vendored"] }
+futures-timer = { version = "3", optional = true }
+
+[features]
+default = []
+dioxus-gui = ["dep:dioxus", "dep:dioxus-desktop", "dep:native-tls", "dep:futures-timer"]
+dioxus-demo = ["dioxus-gui"]

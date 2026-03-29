@@ -227,6 +227,8 @@ impl<
                         cpu_norm,
                         cpu_norm * num_cores,
                         cpu_rel,
+                        proc_.virtual_mem,
+                        proc_.physical_mem,
                     )
                 })
             })
