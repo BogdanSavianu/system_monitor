@@ -2,9 +2,9 @@ mod app;
 #[cfg(feature = "dioxus-gui")]
 mod backend;
 #[cfg(feature = "dioxus-gui")]
-mod runtime;
-#[cfg(feature = "dioxus-gui")]
 mod components;
+#[cfg(feature = "dioxus-gui")]
+mod runtime;
 #[cfg(feature = "dioxus-gui")]
 mod state;
 mod view_models;

@@ -6,8 +6,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 
 pub fn init_logging() {
-    let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     if let Err(err) = fs::create_dir_all("logs") {
         eprintln!("failed to create logs directory: {err}");

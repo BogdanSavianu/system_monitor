@@ -1,7 +1,4 @@
-use system_monitor::{
-    dto::ProcessHierarchyNodeDTO,
-    util::ParseError,
-};
+use system_monitor::{dto::ProcessHierarchyNodeDTO, util::ParseError};
 
 use super::{AppMonitor, CliArgs};
 

@@ -125,7 +125,9 @@ pub fn run_interactive_worker_mode() -> Result<(), ParseError> {
     let worker = thread::spawn(move || worker_loop(cmd_rx, res_tx));
 
     println!("worker mode started");
-    println!("commands: cpu [pid=<pid>], threads [pid=<pid>], network [pid=<pid>], hierarchy, quit");
+    println!(
+        "commands: cpu [pid=<pid>], threads [pid=<pid>], network [pid=<pid>], hierarchy, quit"
+    );
 
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
