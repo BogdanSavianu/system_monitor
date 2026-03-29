@@ -17,4 +17,3 @@ futures-timer = { version = "3", optional = true }
 [features]
 default = []
 dioxus-gui = ["dep:dioxus", "dep:dioxus-desktop", "dep:native-tls", "dep:futures-timer"]
-dioxus-demo = ["dioxus-gui"]

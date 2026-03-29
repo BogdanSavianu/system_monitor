@@ -19,11 +19,6 @@ pub fn is_worker_mode_requested() -> bool {
     args.len() == 1 && (args[0] == "--worker" || args[0] == "-worker")
 }
 
-pub fn is_dioxus_demo_requested() -> bool {
-    let args: Vec<String> = env::args().skip(1).collect();
-    args.len() == 1 && args[0] == "--dioxus-demo"
-}
-
 pub fn parse_args() -> Result<CliArgs, ParseError> {
     let mut show_threads = false;
     let mut show_network = false;
