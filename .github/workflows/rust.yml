@@ -26,7 +26,10 @@ jobs:
             libgdk-pixbuf-2.0-dev \
             libpango1.0-dev \
             libcairo2-dev \
-            libayatana-appindicator3-dev
+            libayatana-appindicator3-dev \
+            libxdo-dev \
+            libssl-dev \
+            perl
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev || \
             sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.0-dev
       - name: Install Rust toolchain
@@ -38,9 +41,9 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Clippy check
-        run: cargo clippy --all-targets --all-features
+        run: cargo clippy --all-targets --features dioxus-gui
       - name: Run tests
-        run: cargo test --all-features --verbose
+        run: cargo test --features dioxus-gui --verbose
 
   matrix:
     name: Matrix (${{ matrix.os }}, ${{ matrix.toolchain }})
@@ -63,7 +66,10 @@ jobs:
             libgdk-pixbuf-2.0-dev \
             libpango1.0-dev \
             libcairo2-dev \
-            libayatana-appindicator3-dev
+            libayatana-appindicator3-dev \
+            libxdo-dev \
+            libssl-dev \
+            perl
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev || \
             sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.0-dev
       - name: Install Rust toolchain
@@ -73,9 +79,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --all-features --verbose
+        run: cargo build --features dioxus-gui --verbose
       - name: Run tests
-        run: cargo test --all-features --verbose
+        run: cargo test --features dioxus-gui --verbose
 
   distro-containers:
     name: Distro (${{ matrix.name }})
@@ -99,7 +105,10 @@ jobs:
                 libgdk-pixbuf-2.0-dev \
                 libpango1.0-dev \
                 libcairo2-dev \
-                libayatana-appindicator3-dev
+                libayatana-appindicator3-dev \
+                libxdo-dev \
+                libssl-dev \
+                perl
               apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev || \
                 apt-get install -y --no-install-recommends libwebkit2gtk-4.0-dev
           - name: fedora-40
@@ -119,7 +128,10 @@ jobs:
                 pango-devel \
                 cairo-devel \
                 webkit2gtk4.1-devel \
-                libappindicator-gtk3-devel
+                libappindicator-gtk3-devel \
+                libxdo-devel \
+                openssl-devel \
+                perl
               dnf clean all
     container:
       image: ${{ matrix.image }}
@@ -133,6 +145,6 @@ jobs:
           curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Build
-        run: cargo build --all-features --verbose
+        run: cargo build --features dioxus-gui --verbose
       - name: Run tests
-        run: cargo test --all-features --verbose
+        run: cargo test --features dioxus-gui --verbose

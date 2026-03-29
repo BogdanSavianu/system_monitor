@@ -11,7 +11,7 @@ ASSET_BASENAME := $(BIN_NAME)-$(OS)-$(ARCH)
 TARBALL := $(DIST_DIR)/$(ASSET_BASENAME).tar.gz
 CHECKSUM := $(TARBALL).sha256
 
-.PHONY: css watch-css run-demo check-demo check-gui run-gui release-build release-package clean-dist
+.PHONY: css watch-css check-gui run-gui release-build release-package clean-dist
 
 VERSION ?=
 
@@ -22,12 +22,6 @@ css:
 watch-css:
 	@command -v $(SASS) >/dev/null 2>&1 || { echo "sass CLI not found. Install dart-sass first."; exit 1; }
 	$(SASS) --watch --no-source-map $(SCSS_SRC):$(CSS_OUT)
-
-check-demo: css
-	cargo check --features dioxus-demo
-
-run-demo: css
-	cargo run --features dioxus-demo -- --dioxus-demo
 
 check-gui: css
 	cargo check --features dioxus-gui
