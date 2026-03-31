@@ -2,6 +2,7 @@
 /dist
 /.vscode
 /src/app/dioxus_demo/*
+/logs/*
 output.txt
 notes.md
 dioxus-setup.md
