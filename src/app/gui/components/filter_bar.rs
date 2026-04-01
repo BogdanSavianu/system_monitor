@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 pub fn FilterBar(filter_text: String, on_change: EventHandler<String>) -> Element {
     rsx! {
         div {
-            class: "demo-filter",
+            class: "filter",
             label { "Filter pid/name: " }
             input {
                 value: "{filter_text}",

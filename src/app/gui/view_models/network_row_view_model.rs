@@ -1,6 +1,6 @@
 use system_monitor::{dto::ProcessNetworkSampleDTO, util::Pid};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct NetworkRowViewModel {
     pub pid: Pid,
     pub name: String,

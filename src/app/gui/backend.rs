@@ -1,10 +1,14 @@
 use std::{
+    collections::HashMap,
     sync::mpsc,
     thread,
     time::{Duration, SystemTime},
 };
 
-use system_monitor::{dto::ProcessCpuSampleDTO, util::ParseError};
+use system_monitor::{
+    dto::{ProcessCpuSampleDTO, ProcessNetworkSampleDTO, ThreadCpuSampleDTO},
+    util::{ParseError, Pid},
+};
 use tracing::info;
 
 use crate::app::build_monitor;
@@ -13,6 +17,9 @@ use crate::app::build_monitor;
 pub struct CpuSnapshot {
     pub collected_at: SystemTime,
     pub cpu: Vec<ProcessCpuSampleDTO>,
+    pub threads: Vec<ThreadCpuSampleDTO>,
+    pub network: Vec<ProcessNetworkSampleDTO>,
+    pub cmdline_by_pid: HashMap<Pid, String>,
 }
 
 #[derive(Debug)]
@@ -64,10 +71,21 @@ pub fn spawn_backend(sample_interval: Duration) -> GuiBackendHandle {
         loop {
             let snapshot = (|| -> Result<CpuSnapshot, ParseError> {
                 let cpu = monitor.sample_cpu_usage()?;
+                let threads = monitor.sample_thread_cpu_usage()?;
+                let network = monitor.sample_process_network_stats()?;
+                let cmdline_by_pid = monitor
+                    .state()
+                    .processes
+                    .iter()
+                    .map(|(pid, process)| (*pid, process.cmdline.clone()))
+                    .collect();
 
                 Ok(CpuSnapshot {
                     collected_at: SystemTime::now(),
                     cpu,
+                    threads,
+                    network,
+                    cmdline_by_pid,
                 })
             })();
 

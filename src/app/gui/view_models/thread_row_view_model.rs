@@ -3,7 +3,7 @@ use system_monitor::{
     util::{Pid, Tid},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ThreadRowViewModel {
     pub pid: Pid,
     pub tid: Tid,

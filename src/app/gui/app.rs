@@ -36,23 +36,33 @@ fn GuiApp() -> Element {
 
     let state_read = state.read().clone();
     let rows = state_read.rows.clone();
+    let thread_rows = state_read.thread_rows.clone();
+    let network_rows = state_read.network_rows.clone();
+    let cmdline_by_pid = state_read.cmdline_by_pid.clone();
+    let cpu_top_history_by_pid = state_read.cpu_top_history_by_pid.clone();
     let selected_pid = state_read.selected_pid;
+    let details_expanded = state_read.details_expanded;
     let status_line = state_read.status_line.clone();
     let view_filter_text = state_read.filter_text.clone();
 
     rsx! {
         div {
-            class: "demo-root",
+            class: "root",
             style { "{APP_CSS}" }
 
             div {
-                class: "demo-shell",
+                class: if details_expanded { "shell shell-fullscreen" } else { "shell" },
                 h1 { "System Monitor" }
-                p { class: "demo-subtitle", "{status_line}" }
+                p { class: "subtitle", "{status_line}" }
 
                 ProcessesView {
                     rows: rows,
+                    thread_rows: thread_rows,
+                    network_rows: network_rows,
+                    cmdline_by_pid: cmdline_by_pid,
+                    cpu_top_history_by_pid: cpu_top_history_by_pid,
                     selected_pid: selected_pid,
+                    details_expanded: details_expanded,
                     filter_text: view_filter_text,
                     on_filter_change: move |value| {
                         state.with_mut(|state| state.filter_text = value);
@@ -60,6 +70,11 @@ fn GuiApp() -> Element {
                     on_select: move |pid| {
                         state.with_mut(|state| {
                             state.selected_pid = Some(pid);
+                        });
+                    },
+                    on_toggle_details: move |_| {
+                        state.with_mut(|state| {
+                            state.details_expanded = !state.details_expanded;
                         });
                     },
                 }
