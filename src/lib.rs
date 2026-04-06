@@ -4,5 +4,6 @@ pub mod monitor;
 pub mod parser;
 pub mod process;
 pub mod state;
+pub mod storage;
 pub mod thread;
 pub mod util;
