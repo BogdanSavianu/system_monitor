@@ -76,17 +76,16 @@ fn render_cpu_history_svg(cpu_top_history: &[f64]) -> Option<String> {
     Some(svg)
 }
 
-#[component]
-pub fn ProcessDetailsView(
-    selected_row: Option<ProcessRowViewModel>,
-    selected_threads: Vec<ThreadRowViewModel>,
-    selected_network: Option<NetworkRowViewModel>,
-    selected_cmdline: Option<String>,
-    cpu_top_history: Vec<f64>,
+pub fn render_process_details(
+    selected_row: Option<&ProcessRowViewModel>,
+    selected_threads: &[&ThreadRowViewModel],
+    selected_network: Option<&NetworkRowViewModel>,
+    selected_cmdline: Option<&str>,
+    cpu_top_history: &[f64],
     expanded: bool,
     on_toggle_expand: EventHandler<()>,
 ) -> Element {
-    let cmdline_text = selected_cmdline.unwrap_or_else(|| "(not available)".to_string());
+    let cmdline_text = selected_cmdline.unwrap_or("(not available)");
     let max_cpu = cpu_top_history
         .iter()
         .copied()

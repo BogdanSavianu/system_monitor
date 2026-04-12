@@ -5,62 +5,51 @@ use system_monitor::util::Pid;
 use crate::app::gui::components::FilterBar;
 use crate::app::gui::view_models::{NetworkRowViewModel, ProcessRowViewModel, ThreadRowViewModel};
 
-use super::{ProcessDetailsView, ProcessRowView};
+use super::{render_process_details, render_process_row};
 
-#[component]
-pub fn ProcessesView(
-    rows: Vec<ProcessRowViewModel>,
-    thread_rows: Vec<ThreadRowViewModel>,
-    network_rows: Vec<NetworkRowViewModel>,
-    cmdline_by_pid: HashMap<Pid, String>,
-    cpu_top_history_by_pid: HashMap<Pid, Vec<f64>>,
-    selected_pid: Option<Pid>,
+pub fn render_processes_view(
+    rows: &[ProcessRowViewModel],
+    thread_rows: &[ThreadRowViewModel],
+    network_rows: &[NetworkRowViewModel],
+    cmdline_by_pid: &HashMap<Pid, String>,
+    cpu_top_history_by_pid: &HashMap<Pid, Vec<f64>>,
+    selected_pid: Option<u32>,
     details_expanded: bool,
-    filter_text: String,
+    filter_text: &str,
     on_filter_change: EventHandler<String>,
-    on_select: EventHandler<Pid>,
+    on_select: EventHandler<u32>,
     on_toggle_details: EventHandler<()>,
 ) -> Element {
     let filter = filter_text.to_lowercase();
-    let selected_row = rows
-        .iter()
-        .find(|row| Some(row.pid) == selected_pid)
-        .cloned();
-
-    let selected_threads = selected_pid
+    let selected_row = selected_pid.and_then(|pid| rows.iter().find(|row| row.pid == pid));
+    let mut selected_threads: Vec<_> = selected_pid
         .map(|pid| {
-            let mut rows: Vec<ThreadRowViewModel> = thread_rows
+            thread_rows
                 .iter()
                 .filter(|row| row.pid == pid)
-                .cloned()
-                .collect();
-            rows.sort_by(|a, b| b.cpu_top.total_cmp(&a.cpu_top));
-            rows
+                .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-
-    let selected_network =
-        selected_pid.and_then(|pid| network_rows.iter().find(|row| row.pid == pid).cloned());
-
-    let selected_cmdline = selected_pid.and_then(|pid| cmdline_by_pid.get(&pid).cloned());
-
+    selected_threads.sort_by(|a, b| b.cpu_top.total_cmp(&a.cpu_top));
+    let selected_network = selected_pid.and_then(|pid| network_rows.iter().find(|row| row.pid == pid));
+    let selected_cmdline = selected_pid.and_then(|pid| cmdline_by_pid.get(&pid).map(String::as_str));
     let selected_cpu_history = selected_pid
-        .and_then(|pid| cpu_top_history_by_pid.get(&pid).cloned())
-        .unwrap_or_default();
+        .and_then(|pid| cpu_top_history_by_pid.get(&pid).map(Vec::as_slice))
+        .unwrap_or(&[]);
 
     rsx! {
         if details_expanded {
             div {
                 class: "details-page",
-                ProcessDetailsView {
-                    selected_row: selected_row,
-                    selected_threads: selected_threads,
-                    selected_network: selected_network,
-                    selected_cmdline: selected_cmdline,
-                    cpu_top_history: selected_cpu_history,
-                    expanded: details_expanded,
-                    on_toggle_expand: on_toggle_details,
-                }
+                {render_process_details(
+                    selected_row,
+                    &selected_threads,
+                    selected_network,
+                    selected_cmdline,
+                    selected_cpu_history,
+                    details_expanded,
+                    on_toggle_details,
+                )}
             }
         } else {
             div {
@@ -69,7 +58,7 @@ pub fn ProcessesView(
                 div {
                     class: "list-panel",
                     FilterBar {
-                        filter_text: filter_text,
+                        filter_text: filter_text.to_string(),
                         on_change: on_filter_change,
                     }
 
@@ -94,25 +83,21 @@ pub fn ProcessesView(
                                         || row.name.to_lowercase().contains(&filter)
                                 }
                             }) {
-                                ProcessRowView {
-                                    row: row.clone(),
-                                    selected: selected_pid == Some(row.pid),
-                                    on_select: on_select.clone(),
-                                }
+                                {render_process_row(row, selected_pid == Some(row.pid), on_select)}
                             }
                         }
                     }
                 }
 
-                ProcessDetailsView {
-                    selected_row: selected_row,
-                    selected_threads: selected_threads,
-                    selected_network: selected_network,
-                    selected_cmdline: selected_cmdline,
-                    cpu_top_history: selected_cpu_history,
-                    expanded: details_expanded,
-                    on_toggle_expand: on_toggle_details,
-                }
+                {render_process_details(
+                    selected_row,
+                    &selected_threads,
+                    selected_network,
+                    selected_cmdline,
+                    selected_cpu_history,
+                    details_expanded,
+                    on_toggle_details,
+                )}
             }
         }
     }

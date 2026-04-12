@@ -20,7 +20,7 @@ use super::{
         GuiPersistentSettings, gui_settings_file_path, load_gui_settings, save_gui_settings,
     },
     state::{GuiPage, GuiState},
-    views::{ProcessesView, SettingsView},
+    views::{SettingsView, render_processes_view},
 };
 #[cfg(feature = "dioxus-gui")]
 use crate::app::factory::MonitorBuildSettings;
@@ -164,12 +164,7 @@ fn GuiApp() -> Element {
 
     use_future(move || run_sync_loop(state, backend));
 
-    let state_read = state.read().clone();
-    let rows = state_read.rows.clone();
-    let thread_rows = state_read.thread_rows.clone();
-    let network_rows = state_read.network_rows.clone();
-    let cmdline_by_pid = state_read.cmdline_by_pid.clone();
-    let cpu_top_history_by_pid = state_read.cpu_top_history_by_pid.clone();
+    let state_read = state.read();
     let selected_pid = state_read.selected_pid;
     let details_expanded = state_read.details_expanded;
     let active_page = state_read.active_page;
@@ -177,6 +172,7 @@ fn GuiApp() -> Element {
     let settings_anomaly_enabled = state_read.settings_anomaly_enabled;
     let status_line = state_read.status_line.clone();
     let view_filter_text = state_read.filter_text.clone();
+
     let active_css = css.read().clone();
 
     rsx! {
@@ -201,29 +197,29 @@ fn GuiApp() -> Element {
                 }
 
                 if active_page == GuiPage::Monitor {
-                    ProcessesView {
-                        rows: rows,
-                        thread_rows: thread_rows,
-                        network_rows: network_rows,
-                        cmdline_by_pid: cmdline_by_pid,
-                        cpu_top_history_by_pid: cpu_top_history_by_pid,
-                        selected_pid: selected_pid,
-                        details_expanded: details_expanded,
-                        filter_text: view_filter_text,
-                        on_filter_change: move |value| {
+                    {render_processes_view(
+                        &state_read.rows,
+                        &state_read.thread_rows,
+                        &state_read.network_rows,
+                        &state_read.cmdline_by_pid,
+                        &state_read.cpu_top_history_by_pid,
+                        selected_pid,
+                        details_expanded,
+                        &view_filter_text,
+                        Callback::new(move |value| {
                             state.with_mut(|state| state.filter_text = value);
-                        },
-                        on_select: move |pid| {
+                        }),
+                        Callback::new(move |pid| {
                             state.with_mut(|state| {
                                 state.selected_pid = Some(pid);
                             });
-                        },
-                        on_toggle_details: move |_| {
+                        }),
+                        Callback::new(move |_| {
                             state.with_mut(|state| {
                                 state.details_expanded = !state.details_expanded;
                             });
-                        },
-                    }
+                        }),
+                    )}
                 } else {
                     SettingsView {
                         storage_enabled: settings_storage_enabled,
