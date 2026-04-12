@@ -44,6 +44,17 @@
   color: #0f766e;
 }
 
+.filter {
+  margin-bottom: 12px;
+}
+
+.filter input {
+  margin-left: 8px;
+  border: 1px solid #dbe3ec;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
 .settings-page {
   display: grid;
   gap: 12px;
@@ -134,15 +145,9 @@
   color: #0f766e;
 }
 
-.filter {
-  margin-bottom: 12px;
-}
-
-.filter input {
-  margin-left: 8px;
-  border: 1px solid #dbe3ec;
-  border-radius: 8px;
-  padding: 6px 10px;
+.settings-page .settings-section .settings-body input {
+  width: 20px;
+  height: 20px;
 }
 
 .main-grid {
@@ -194,6 +199,9 @@
   font-weight: 700;
 }
 
+.details-panel {
+  height: fit-content;
+}
 .details-panel h2 {
   margin: 0;
 }
@@ -313,7 +321,6 @@
     grid-template-columns: 1fr;
   }
 }
-
 .list button {
   width: 100%;
   text-align: left;

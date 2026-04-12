@@ -4,6 +4,10 @@ use tracing::{info, warn};
 
 #[cfg(feature = "dioxus-gui")]
 use dioxus::prelude::*;
+#[cfg(all(feature = "dioxus-gui", debug_assertions))]
+use futures_timer::Delay;
+#[cfg(all(feature = "dioxus-gui", debug_assertions))]
+use std::fs;
 #[cfg(feature = "dioxus-gui")]
 use std::time::Duration;
 
@@ -25,6 +29,60 @@ use crate::app::factory::MonitorBuildSettings;
 const APP_CSS: &str = include_str!("styles/app.css");
 #[cfg(feature = "dioxus-gui")]
 const BACKEND_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
+#[cfg(all(feature = "dioxus-gui", debug_assertions))]
+const APP_CSS_DEV_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/app/gui/styles/app.css");
+
+#[cfg(all(feature = "dioxus-gui", debug_assertions))]
+fn load_initial_css() -> String {
+    fs::read_to_string(APP_CSS_DEV_PATH).unwrap_or_else(|_| APP_CSS.to_string())
+}
+
+#[cfg(all(feature = "dioxus-gui", debug_assertions))]
+fn use_dev_css_hot_reload(mut css: Signal<String>) {
+    let mut css_last_modified = use_signal(|| {
+        fs::metadata(APP_CSS_DEV_PATH)
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+    });
+
+    use_future(move || async move {
+        loop {
+            let next_modified = fs::metadata(APP_CSS_DEV_PATH)
+                .ok()
+                .and_then(|meta| meta.modified().ok());
+
+            let should_reload = {
+                let prev = *css_last_modified.read();
+                next_modified != prev
+            };
+
+            if should_reload {
+                css_last_modified.set(next_modified);
+
+                match fs::read_to_string(APP_CSS_DEV_PATH) {
+                    Ok(next_css) => {
+                        css.set(next_css);
+                        info!(
+                            target: "app::gui_css",
+                            path = APP_CSS_DEV_PATH,
+                            "reloaded css from disk"
+                        );
+                    }
+                    Err(err) => {
+                        warn!(
+                            target: "app::gui_css",
+                            path = APP_CSS_DEV_PATH,
+                            error = %err,
+                            "failed to reload css from disk; keeping previous css"
+                        );
+                    }
+                }
+            }
+
+            Delay::new(Duration::from_millis(500)).await;
+        }
+    });
+}
 
 #[cfg(feature = "dioxus-gui")]
 fn restart_backend_with_settings(
@@ -59,6 +117,14 @@ pub fn run_gui_app() -> Result<(), ParseError> {
 #[cfg(feature = "dioxus-gui")]
 #[allow(non_snake_case)]
 fn GuiApp() -> Element {
+    #[cfg(debug_assertions)]
+    let css = use_signal(load_initial_css);
+    #[cfg(not(debug_assertions))]
+    let css = use_signal(|| APP_CSS.to_string());
+
+    #[cfg(debug_assertions)]
+    use_dev_css_hot_reload(css);
+
     let initial_settings = use_signal(|| {
         let settings_path = gui_settings_file_path();
         let loaded = load_gui_settings().unwrap_or_else(|err| {
@@ -111,11 +177,12 @@ fn GuiApp() -> Element {
     let settings_anomaly_enabled = state_read.settings_anomaly_enabled;
     let status_line = state_read.status_line.clone();
     let view_filter_text = state_read.filter_text.clone();
+    let active_css = css.read().clone();
 
     rsx! {
         div {
             class: "root",
-            style { "{APP_CSS}" }
+            style { "{active_css}" }
 
             div {
                 class: if details_expanded && active_page == GuiPage::Monitor {
