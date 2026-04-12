@@ -78,6 +78,8 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: matrix-${{ matrix.os }}-${{ matrix.toolchain }}
       - name: Build
         run: cargo build --features dioxus-gui --verbose
       - name: Run tests
