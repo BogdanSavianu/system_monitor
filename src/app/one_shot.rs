@@ -16,5 +16,7 @@ pub fn run_once(args: &CliArgs) -> Result<(), ParseError> {
         sleep(Duration::from_millis(2000));
     }
 
-    output::print_samples(&mut monitor, args)
+    let result = output::print_samples(&mut monitor, args);
+    monitor.flush_storage_pipeline();
+    result
 }

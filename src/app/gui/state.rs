@@ -4,6 +4,12 @@ use system_monitor::util::Pid;
 
 use super::view_models::{NetworkRowViewModel, ProcessRowViewModel, ThreadRowViewModel};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuiPage {
+    Monitor,
+    Settings,
+}
+
 #[derive(Debug, Clone)]
 pub struct GuiState {
     pub rows: Vec<ProcessRowViewModel>,
@@ -13,6 +19,9 @@ pub struct GuiState {
     pub cpu_top_history_by_pid: HashMap<Pid, Vec<f64>>,
     pub selected_pid: Option<Pid>,
     pub details_expanded: bool,
+    pub active_page: GuiPage,
+    pub settings_storage_enabled: bool,
+    pub settings_anomaly_enabled: bool,
     pub filter_text: String,
     pub status_line: String,
 }
@@ -27,6 +36,9 @@ impl GuiState {
             cpu_top_history_by_pid: HashMap::new(),
             selected_pid: None,
             details_expanded: false,
+            active_page: GuiPage::Monitor,
+            settings_storage_enabled: false,
+            settings_anomaly_enabled: false,
             filter_text: String::new(),
             status_line: "waiting for first sample...".to_string(),
         }

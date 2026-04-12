@@ -116,6 +116,8 @@ fn worker_loop(
             }
         }
     }
+
+    monitor.flush_storage_pipeline();
 }
 
 pub fn run_interactive_worker_mode() -> Result<(), ParseError> {

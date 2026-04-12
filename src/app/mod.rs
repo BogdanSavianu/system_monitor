@@ -1,4 +1,5 @@
 mod args;
+mod factory;
 mod gui;
 mod logging;
 mod one_shot;
@@ -10,18 +11,33 @@ use system_monitor::{
     parser::{NetworkParser, ProcessParser, ThreadParser},
     util::ParseError,
 };
-use tracing::info;
+use tracing::{info, warn};
 
 pub use args::CliArgs;
 
 type AppMonitor = Monitor<ProcessParser, ThreadParser, NetworkParser>;
 
 fn build_monitor() -> AppMonitor {
-    Monitor::with_parsers(
-        ProcessParser::new(),
-        ThreadParser::new(),
-        NetworkParser::new(),
-    )
+    let settings = factory::MonitorBuildSettings::from_env();
+    build_monitor_with_settings(settings)
+}
+
+fn build_monitor_with_settings(settings: factory::MonitorBuildSettings) -> AppMonitor {
+    match factory::build_monitor(&settings) {
+        Ok(monitor) => monitor,
+        Err(err) => {
+            warn!(
+                target: "app::factory",
+                error = ?err,
+                "falling back to monitor without storage pipeline"
+            );
+            Monitor::with_parsers(
+                ProcessParser::new(),
+                ThreadParser::new(),
+                NetworkParser::new(),
+            )
+        }
+    }
 }
 
 pub fn run() -> Result<(), ParseError> {

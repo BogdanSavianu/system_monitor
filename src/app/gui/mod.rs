@@ -6,6 +6,8 @@ mod components;
 #[cfg(feature = "dioxus-gui")]
 mod runtime;
 #[cfg(feature = "dioxus-gui")]
+mod settings_store;
+#[cfg(feature = "dioxus-gui")]
 mod state;
 mod view_models;
 #[cfg(feature = "dioxus-gui")]

@@ -1,4 +1,6 @@
 use system_monitor::util::ParseError;
+#[cfg(feature = "dioxus-gui")]
+use tracing::{info, warn};
 
 #[cfg(feature = "dioxus-gui")]
 use dioxus::prelude::*;
@@ -7,11 +9,39 @@ use std::time::Duration;
 
 #[cfg(feature = "dioxus-gui")]
 use super::{
-    backend::spawn_backend, runtime::run_sync_loop, state::GuiState, views::ProcessesView,
+    backend::{GuiBackendHandle, spawn_backend},
+    components::AppNav,
+    runtime::run_sync_loop,
+    settings_store::{
+        GuiPersistentSettings, gui_settings_file_path, load_gui_settings, save_gui_settings,
+    },
+    state::{GuiPage, GuiState},
+    views::{ProcessesView, SettingsView},
 };
+#[cfg(feature = "dioxus-gui")]
+use crate::app::factory::MonitorBuildSettings;
 
 #[cfg(feature = "dioxus-gui")]
 const APP_CSS: &str = include_str!("styles/app.css");
+#[cfg(feature = "dioxus-gui")]
+const BACKEND_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
+
+#[cfg(feature = "dioxus-gui")]
+fn restart_backend_with_settings(
+    mut backend: Signal<Option<GuiBackendHandle>>,
+    settings: GuiPersistentSettings,
+) {
+    let monitor_settings = MonitorBuildSettings::from_env()
+        .with_toggles(settings.storage_enabled, settings.anomaly_enabled);
+
+    backend.with_mut(|slot| {
+        if let Some(handle) = slot.as_mut() {
+            handle.shutdown();
+        }
+
+        *slot = Some(spawn_backend(BACKEND_SAMPLE_INTERVAL, monitor_settings));
+    });
+}
 
 #[cfg(feature = "dioxus-gui")]
 pub fn run_gui_app() -> Result<(), ParseError> {
@@ -29,8 +59,42 @@ pub fn run_gui_app() -> Result<(), ParseError> {
 #[cfg(feature = "dioxus-gui")]
 #[allow(non_snake_case)]
 fn GuiApp() -> Element {
-    let mut state = use_signal(GuiState::new);
-    let backend = use_signal(|| Some(spawn_backend(Duration::from_secs(2))));
+    let initial_settings = use_signal(|| {
+        let settings_path = gui_settings_file_path();
+        let loaded = load_gui_settings().unwrap_or_else(|err| {
+            warn!(
+                target: "app::gui_settings",
+                error = %err,
+                "failed to load persisted gui settings; using defaults"
+            );
+            GuiPersistentSettings::default()
+        });
+
+        info!(
+            target: "app::gui_settings",
+            path = %settings_path.display(),
+            storage_enabled = loaded.storage_enabled,
+            anomaly_enabled = loaded.anomaly_enabled,
+            "loaded gui settings"
+        );
+
+        loaded
+    });
+    let persisted_settings = *initial_settings.read();
+
+    let mut state = use_signal(move || {
+        let mut state = GuiState::new();
+        state.settings_storage_enabled = persisted_settings.storage_enabled;
+        state.settings_anomaly_enabled = persisted_settings.anomaly_enabled;
+        state
+    });
+    let backend = use_signal(move || {
+        let monitor_settings = MonitorBuildSettings::from_env().with_toggles(
+            persisted_settings.storage_enabled,
+            persisted_settings.anomaly_enabled,
+        );
+        Some(spawn_backend(BACKEND_SAMPLE_INTERVAL, monitor_settings))
+    });
 
     use_future(move || run_sync_loop(state, backend));
 
@@ -42,6 +106,9 @@ fn GuiApp() -> Element {
     let cpu_top_history_by_pid = state_read.cpu_top_history_by_pid.clone();
     let selected_pid = state_read.selected_pid;
     let details_expanded = state_read.details_expanded;
+    let active_page = state_read.active_page;
+    let settings_storage_enabled = state_read.settings_storage_enabled;
+    let settings_anomaly_enabled = state_read.settings_anomaly_enabled;
     let status_line = state_read.status_line.clone();
     let view_filter_text = state_read.filter_text.clone();
 
@@ -51,32 +118,108 @@ fn GuiApp() -> Element {
             style { "{APP_CSS}" }
 
             div {
-                class: if details_expanded { "shell shell-fullscreen" } else { "shell" },
+                class: if details_expanded && active_page == GuiPage::Monitor {
+                    "shell shell-fullscreen"
+                } else {
+                    "shell"
+                },
                 h1 { "System Monitor" }
                 p { class: "subtitle", "{status_line}" }
 
-                ProcessesView {
-                    rows: rows,
-                    thread_rows: thread_rows,
-                    network_rows: network_rows,
-                    cmdline_by_pid: cmdline_by_pid,
-                    cpu_top_history_by_pid: cpu_top_history_by_pid,
-                    selected_pid: selected_pid,
-                    details_expanded: details_expanded,
-                    filter_text: view_filter_text,
-                    on_filter_change: move |value| {
-                        state.with_mut(|state| state.filter_text = value);
-                    },
-                    on_select: move |pid| {
-                        state.with_mut(|state| {
-                            state.selected_pid = Some(pid);
-                        });
-                    },
-                    on_toggle_details: move |_| {
-                        state.with_mut(|state| {
-                            state.details_expanded = !state.details_expanded;
-                        });
-                    },
+                AppNav {
+                    active_page: active_page,
+                    on_change: move |next_page| {
+                        state.with_mut(|state| state.active_page = next_page);
+                    }
+                }
+
+                if active_page == GuiPage::Monitor {
+                    ProcessesView {
+                        rows: rows,
+                        thread_rows: thread_rows,
+                        network_rows: network_rows,
+                        cmdline_by_pid: cmdline_by_pid,
+                        cpu_top_history_by_pid: cpu_top_history_by_pid,
+                        selected_pid: selected_pid,
+                        details_expanded: details_expanded,
+                        filter_text: view_filter_text,
+                        on_filter_change: move |value| {
+                            state.with_mut(|state| state.filter_text = value);
+                        },
+                        on_select: move |pid| {
+                            state.with_mut(|state| {
+                                state.selected_pid = Some(pid);
+                            });
+                        },
+                        on_toggle_details: move |_| {
+                            state.with_mut(|state| {
+                                state.details_expanded = !state.details_expanded;
+                            });
+                        },
+                    }
+                } else {
+                    SettingsView {
+                        storage_enabled: settings_storage_enabled,
+                        anomaly_enabled: settings_anomaly_enabled,
+                        on_storage_toggle: move |enabled| {
+                            let settings = state.with_mut(|state| {
+                                state.settings_storage_enabled = enabled;
+                                state.status_line = "applying settings...".to_string();
+                                GuiPersistentSettings {
+                                    storage_enabled: state.settings_storage_enabled,
+                                    anomaly_enabled: state.settings_anomaly_enabled,
+                                }
+                            });
+
+                            if let Err(err) = save_gui_settings(settings) {
+                                warn!(
+                                    target: "app::gui_settings",
+                                    error = %err,
+                                    "failed to persist gui settings"
+                                );
+                            }
+
+                            restart_backend_with_settings(backend, settings);
+                        },
+                        on_anomaly_toggle: move |enabled| {
+                            let settings = state.with_mut(|state| {
+                                state.settings_anomaly_enabled = enabled;
+                                state.status_line = "applying settings...".to_string();
+                                GuiPersistentSettings {
+                                    storage_enabled: state.settings_storage_enabled,
+                                    anomaly_enabled: state.settings_anomaly_enabled,
+                                }
+                            });
+
+                            if let Err(err) = save_gui_settings(settings) {
+                                warn!(
+                                    target: "app::gui_settings",
+                                    error = %err,
+                                    "failed to persist gui settings"
+                                );
+                            }
+
+                            restart_backend_with_settings(backend, settings);
+                        },
+                        on_reset: move |_| {
+                            let settings = state.with_mut(|state| {
+                                state.settings_storage_enabled = false;
+                                state.settings_anomaly_enabled = false;
+                                state.status_line = "applying settings...".to_string();
+                                GuiPersistentSettings::default()
+                            });
+
+                            if let Err(err) = save_gui_settings(settings) {
+                                warn!(
+                                    target: "app::gui_settings",
+                                    error = %err,
+                                    "failed to persist gui settings"
+                                );
+                            }
+
+                            restart_backend_with_settings(backend, settings);
+                        },
+                    }
                 }
             }
         }

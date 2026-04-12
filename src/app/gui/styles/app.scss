@@ -30,6 +30,117 @@ $border: #dbe3ec;
   color: $muted;
 }
 
+.app-nav {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+
+.app-nav-btn {
+  border: 1px solid $border;
+  border-radius: 8px;
+  background: #ffffff;
+  color: $text;
+  font-weight: 600;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.app-nav-btn.active {
+  border-color: $accent;
+  color: $accent;
+}
+
+.settings-page {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-section {
+  border: 1px solid $border;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.settings-title {
+  margin: 0;
+}
+
+.settings-description {
+  margin: 6px 0 10px;
+  color: $muted;
+}
+
+.settings-body {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid $border;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.settings-toggle-text {
+  display: grid;
+  gap: 2px;
+}
+
+.settings-toggle-label {
+  font-weight: 700;
+}
+
+.settings-toggle-hint {
+  color: $muted;
+  font-size: 0.86rem;
+}
+
+.settings-kv {
+  display: flex;
+  justify-content: space-between;
+  border: 1px solid $border;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+}
+
+.settings-k {
+  color: $muted;
+}
+
+.settings-v {
+  font-weight: 700;
+}
+
+.settings-note {
+  margin: 0;
+  color: $accent;
+  font-size: 0.9rem;
+}
+
+.settings-reset-btn {
+  justify-self: start;
+  border: 1px solid $border;
+  border-radius: 8px;
+  background: #ffffff;
+  color: $text;
+  font-weight: 600;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.settings-reset-btn:hover {
+  border-color: $accent;
+  color: $accent;
+}
+
 .filter {
   margin-bottom: 12px;
 }

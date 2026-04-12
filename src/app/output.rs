@@ -31,7 +31,8 @@ pub fn render_samples_to_string(
         lines.push("process_hierarchy_tree".to_string());
         collect_tree_lines(&hierarchy_tree, 0, &mut lines);
     } else if args.show_network {
-        let network_samples = monitor.sample_process_network_stats()?;
+        let observation = monitor.sample_observation_cycle()?;
+        let network_samples = observation.network;
         for sample in network_samples
             .iter()
             .filter(|sample| args.pid_filter.is_none_or(|pid| sample.pid == pid))
@@ -74,7 +75,8 @@ pub fn render_samples_to_string(
             ));
         }
     } else {
-        let cpu_samples = monitor.sample_cpu_usage()?;
+        let observation = monitor.sample_observation_cycle()?;
+        let cpu_samples = observation.cpu;
         for sample in cpu_samples
             .iter()
             .filter(|sample| args.pid_filter.is_none_or(|pid| sample.pid == pid))

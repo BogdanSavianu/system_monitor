@@ -11,7 +11,7 @@ use system_monitor::{
 };
 use tracing::info;
 
-use crate::app::build_monitor;
+use crate::app::{build_monitor_with_settings, factory::MonitorBuildSettings};
 
 #[derive(Debug, Clone)]
 pub struct CpuSnapshot {
@@ -50,12 +50,15 @@ impl Drop for GuiBackendHandle {
     }
 }
 
-pub fn spawn_backend(sample_interval: Duration) -> GuiBackendHandle {
+pub fn spawn_backend(
+    sample_interval: Duration,
+    monitor_settings: MonitorBuildSettings,
+) -> GuiBackendHandle {
     let (events_tx, events_rx) = mpsc::channel::<BackendEvent>();
     let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
 
     let join_handle = thread::spawn(move || {
-        let mut monitor = build_monitor();
+        let mut monitor = build_monitor_with_settings(monitor_settings);
 
         if let Err(err) = monitor.initialize_sampling() {
             let _ = events_tx.send(BackendEvent::Error(format!(
@@ -70,9 +73,8 @@ pub fn spawn_backend(sample_interval: Duration) -> GuiBackendHandle {
 
         loop {
             let snapshot = (|| -> Result<CpuSnapshot, ParseError> {
-                let cpu = monitor.sample_cpu_usage()?;
+                let observation = monitor.sample_observation_cycle()?;
                 let threads = monitor.sample_thread_cpu_usage()?;
-                let network = monitor.sample_process_network_stats()?;
                 let cmdline_by_pid = monitor
                     .state()
                     .processes
@@ -81,10 +83,10 @@ pub fn spawn_backend(sample_interval: Duration) -> GuiBackendHandle {
                     .collect();
 
                 Ok(CpuSnapshot {
-                    collected_at: SystemTime::now(),
-                    cpu,
+                    collected_at: observation.collected_at,
+                    cpu: observation.cpu,
                     threads,
-                    network,
+                    network: observation.network,
                     cmdline_by_pid,
                 })
             })();
@@ -112,6 +114,8 @@ pub fn spawn_backend(sample_interval: Duration) -> GuiBackendHandle {
                 }
             }
         }
+
+        monitor.flush_storage_pipeline();
 
         let _ = events_tx.send(BackendEvent::Stopped);
     });

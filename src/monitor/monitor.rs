@@ -1,5 +1,5 @@
-use std::collections::HashMap;
-use tracing::{debug, info};
+use std::{collections::HashMap, time::SystemTime};
+use tracing::{debug, info, warn};
 
 use crate::{
     dto::{
@@ -12,8 +12,15 @@ use crate::{
         parser::TraitProcessParser, thread_parser::TraitThreadParser,
     },
     state::SystemState,
+    storage::{StorageSink, TraitSampleAccumulator},
     util::{ParseError, Pid, Tid},
 };
+
+pub struct MonitorObservation {
+    pub collected_at: SystemTime,
+    pub cpu: Vec<ProcessCpuSampleDTO>,
+    pub network: Vec<ProcessNetworkSampleDTO>,
+}
 
 pub struct Monitor<
     ProcParser: TraitProcessParser,
@@ -23,6 +30,8 @@ pub struct Monitor<
     parser: Parser<ProcParser, ThrParser, NetParser>,
     system_state: SystemState,
     previous_total_cpu: Option<u64>,
+    accumulator: Option<Box<dyn TraitSampleAccumulator + Send>>,
+    storage_sink: Option<Box<dyn StorageSink + Send>>,
 }
 
 impl Monitor<ProcessParser, ThreadParser, NetworkParser> {
@@ -35,6 +44,8 @@ impl Monitor<ProcessParser, ThreadParser, NetworkParser> {
             ),
             system_state: SystemState::new(),
             previous_total_cpu: None,
+            accumulator: None,
+            storage_sink: None,
         }
     }
 }
@@ -50,10 +61,69 @@ impl<
         thread_parser: ThrParser,
         network_parser: NetParser,
     ) -> Self {
+        Self::with_parsers_and_pipeline(process_parser, thread_parser, network_parser, None, None)
+    }
+
+    pub fn with_parsers_and_pipeline(
+        process_parser: ProcParser,
+        thread_parser: ThrParser,
+        network_parser: NetParser,
+        accumulator: Option<Box<dyn TraitSampleAccumulator + Send>>,
+        storage_sink: Option<Box<dyn StorageSink + Send>>,
+    ) -> Self {
         Monitor {
             parser: Parser::new(process_parser, thread_parser, network_parser),
             system_state: SystemState::new(),
             previous_total_cpu: None,
+            accumulator,
+            storage_sink,
+        }
+    }
+
+    fn persist_observation(
+        &mut self,
+        collected_at: SystemTime,
+        cpu_samples: &[ProcessCpuSampleDTO],
+        network_samples: &[ProcessNetworkSampleDTO],
+    ) {
+        let Some(accumulator) = self.accumulator.as_mut() else {
+            return;
+        };
+        let Some(sink) = self.storage_sink.as_mut() else {
+            return;
+        };
+
+        let maybe_batch = accumulator.accumulate(
+            collected_at,
+            cpu_samples,
+            network_samples,
+            &self.system_state,
+        );
+
+        let Some(batch) = maybe_batch else {
+            return;
+        };
+
+        if let Err(err) = sink.persist_sample_batch(&batch) {
+            warn!(target: "monitor::storage", error = ?err, "failed to persist sample batch");
+        }
+    }
+
+    pub fn flush_storage_pipeline(&mut self) {
+        let collected_at = SystemTime::now();
+
+        if let (Some(accumulator), Some(sink)) =
+            (self.accumulator.as_mut(), self.storage_sink.as_mut())
+        {
+            if let Some(batch) = accumulator.drain_pending(collected_at)
+                && let Err(err) = sink.persist_sample_batch(&batch)
+            {
+                warn!(target: "monitor::storage", error = ?err, "failed to persist drained sample batch");
+            }
+
+            if let Err(err) = sink.flush() {
+                warn!(target: "monitor::storage", error = ?err, "failed to flush sink");
+            }
         }
     }
 
@@ -154,6 +224,19 @@ impl<
         debug!(target: "monitor::sampling", sample_count = samples.len(), "sampled process network stats");
 
         Ok(samples)
+    }
+
+    pub fn sample_observation_cycle(&mut self) -> Result<MonitorObservation, ParseError> {
+        let collected_at = SystemTime::now();
+        let cpu = self.sample_cpu_usage()?;
+        let network = self.sample_process_network_stats()?;
+        self.persist_observation(collected_at, &cpu, &network);
+
+        Ok(MonitorObservation {
+            collected_at,
+            cpu,
+            network,
+        })
     }
 
     pub fn sample_process_hierarchy_indexes(
