@@ -3,78 +3,7 @@ use plotters::prelude::*;
 
 use crate::app::gui::view_models::{NetworkRowViewModel, ProcessRowViewModel, ThreadRowViewModel};
 
-fn render_cpu_history_svg(cpu_top_history: &[f64]) -> Option<String> {
-    if cpu_top_history.is_empty() {
-        return None;
-    }
-
-    let width = 720;
-    let height = 220;
-    let x_max = cpu_top_history.len().saturating_sub(1).max(1);
-    let y_max = cpu_top_history
-        .iter()
-        .copied()
-        .fold(0.0_f64, f64::max)
-        .max(1.0)
-        * 1.10;
-
-    let mut svg = String::new();
-    {
-        let backend = SVGBackend::with_string(&mut svg, (width, height));
-        let root = backend.into_drawing_area();
-        root.fill(&RGBColor(248, 250, 252)).ok()?;
-
-        let mut chart = ChartBuilder::on(&root)
-            .margin(10)
-            .x_label_area_size(24)
-            .y_label_area_size(44)
-            .build_cartesian_2d(0usize..x_max, 0f64..y_max)
-            .ok()?;
-
-        chart
-            .configure_mesh()
-            .disable_x_mesh()
-            .light_line_style(RGBColor(219, 227, 236))
-            .axis_style(RGBColor(100, 116, 139))
-            .y_desc("% CPU")
-            .x_desc("samples")
-            .label_style(
-                ("sans-serif", 12)
-                    .into_font()
-                    .color(&RGBColor(100, 116, 139)),
-            )
-            .draw()
-            .ok()?;
-
-        chart
-            .draw_series(LineSeries::new(
-                cpu_top_history
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, sample)| (idx, *sample)),
-                &RGBColor(15, 118, 110),
-            ))
-            .ok()?;
-
-        chart
-            .draw_series(cpu_top_history.iter().enumerate().map(|(idx, sample)| {
-                Circle::new((idx, *sample), 2, RGBColor(13, 148, 136).filled())
-            }))
-            .ok()?;
-
-        root.present().ok()?;
-    }
-
-    let svg = svg.replacen(
-        "<svg ",
-        &format!(
-            "<svg viewBox=\"0 0 {width} {height}\" preserveAspectRatio=\"none\" style=\"width:100%;height:100%;display:block;\" "
-        ),
-        1,
-    );
-
-    Some(svg)
-}
+use super::render_line_chart_svg;
 
 pub fn render_process_details(
     selected_row: Option<&ProcessRowViewModel>,
@@ -82,6 +11,7 @@ pub fn render_process_details(
     selected_network: Option<&NetworkRowViewModel>,
     selected_cmdline: Option<&str>,
     cpu_top_history: &[f64],
+    physical_mem_history_mb: &[f64],
     expanded: bool,
     on_toggle_expand: EventHandler<()>,
 ) -> Element {
@@ -91,9 +21,28 @@ pub fn render_process_details(
         .copied()
         .fold(0.0_f64, f64::max)
         .max(1.0);
-    let cpu_history_svg = render_cpu_history_svg(&cpu_top_history);
+    let cpu_history_svg = render_line_chart_svg(
+        cpu_top_history,
+        "% CPU",
+        RGBColor(15, 118, 110),
+        RGBColor(13, 148, 136),
+    );
     let has_cpu_history_svg = cpu_history_svg.is_some();
     let cpu_history_svg_markup = cpu_history_svg.unwrap_or_default();
+
+    let max_mem_mb = physical_mem_history_mb
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let memory_history_svg = render_line_chart_svg(
+        physical_mem_history_mb,
+        "MB",
+        RGBColor(2, 132, 199),
+        RGBColor(14, 165, 233),
+    );
+    let has_memory_history_svg = memory_history_svg.is_some();
+    let memory_history_svg_markup = memory_history_svg.unwrap_or_default();
 
     rsx! {
         aside {
@@ -195,6 +144,23 @@ pub fn render_process_details(
                                 div {
                                     class: "graph-svg-host",
                                     dangerous_inner_html: "{cpu_history_svg_markup}",
+                                }
+                            }
+                        }
+                    }
+
+                    div {
+                        class: "details-section",
+                        h3 { "Physical memory history" }
+                        if !has_memory_history_svg {
+                            p { class: "details-empty", "Not enough samples yet to draw history." }
+                        } else {
+                            p { class: "details-subtitle", "Peak: {max_mem_mb:.2} MB" }
+                            div {
+                                class: "graph-line-wrap",
+                                div {
+                                    class: "graph-svg-host",
+                                    dangerous_inner_html: "{memory_history_svg_markup}",
                                 }
                             }
                         }

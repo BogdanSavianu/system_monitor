@@ -17,6 +17,15 @@ pub fn AppNav(active_page: GuiPage, on_change: EventHandler<GuiPage>) -> Element
                 "Monitor"
             }
             button {
+                class: if active_page == GuiPage::System {
+                    "app-nav-btn active"
+                } else {
+                    "app-nav-btn"
+                },
+                onclick: move |_| on_change.call(GuiPage::System),
+                "System"
+            }
+            button {
                 class: if active_page == GuiPage::Settings {
                     "app-nav-btn active"
                 } else {

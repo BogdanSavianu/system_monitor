@@ -245,11 +245,21 @@ impl<
     }
 
     pub fn get_status_info(&self) -> Result<SystemStatusFileModel, ParseError> {
-        let file_path = format!("/proc/stat");
-        let file =
-            File::open(file_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
-        let buf_reader = BufReader::new(file);
-        self.parse_status_info(buf_reader)
+        let stat_file =
+            File::open("/proc/stat").map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let status = self.parse_status_info(BufReader::new(stat_file))?;
+
+        let meminfo_file =
+            File::open("/proc/meminfo").map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let (mem_total_kb, mem_available_kb) = self.parse_meminfo(BufReader::new(meminfo_file))?;
+
+        Ok(SystemStatusFileModel::build(
+            status.total_cpu,
+            status.cpus,
+            status.num_cores,
+            mem_total_kb,
+            mem_available_kb,
+        ))
     }
 
     pub fn get_process_jiffies(&self, system_state: &SystemState) -> HashMap<Pid, u64> {
@@ -383,7 +393,51 @@ impl<
 
         let num_cores = cpus.len() as u8;
 
-        Ok(SystemStatusFileModel::build(total_cpu, cpus, num_cores))
+        Ok(SystemStatusFileModel::build(
+            total_cpu, cpus, num_cores, 0, 0,
+        ))
+    }
+
+    fn parse_meminfo<R>(&self, reader: R) -> Result<(u64, u64), ParseError>
+    where
+        R: BufRead,
+    {
+        let mut mem_total_kb: Option<u64> = None;
+        let mut mem_available_kb: Option<u64> = None;
+
+        for line in reader.lines() {
+            let line = line.map_err(|err| ParseError::ParsingError(err.to_string()))?;
+            let mut parts = line.split_whitespace();
+            let Some(key) = parts.next() else {
+                continue;
+            };
+            let Some(value_raw) = parts.next() else {
+                continue;
+            };
+
+            let value = value_raw
+                .parse::<u64>()
+                .map_err(|err| ParseError::ParsingError(err.to_string()))?;
+
+            match key {
+                "MemTotal:" => mem_total_kb = Some(value),
+                "MemAvailable:" => mem_available_kb = Some(value),
+                _ => {}
+            }
+
+            if mem_total_kb.is_some() && mem_available_kb.is_some() {
+                break;
+            }
+        }
+
+        let total = mem_total_kb.ok_or_else(|| {
+            ParseError::ParsingError("missing MemTotal in /proc/meminfo".to_string())
+        })?;
+        let available = mem_available_kb.ok_or_else(|| {
+            ParseError::ParsingError("missing MemAvailable in /proc/meminfo".to_string())
+        })?;
+
+        Ok((total, available))
     }
 
     fn sum_cpu_jiffies(&self, fields: &[&str]) -> Result<u64, ParseError> {
@@ -544,6 +598,8 @@ intr 123\n";
         assert_eq!(status.total_cpu, 360);
         assert_eq!(status.cpus, vec![36, 44]);
         assert_eq!(status.num_cores, 2);
+        assert_eq!(status.mem_total_kb, 0);
+        assert_eq!(status.mem_available_kb, 0);
     }
 
     #[test]
@@ -560,6 +616,28 @@ intr 123\n";
         let parser = Parser::new(DummyProcessParser, DummyThreadParser, DummyNetworkParser);
         let result = parser.sum_cpu_jiffies(&["1", "2", "3"]);
 
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_meminfo_extracts_memtotal_and_memavailable() {
+        let parser = Parser::new(DummyProcessParser, DummyThreadParser, DummyNetworkParser);
+        let input = "MemTotal:       32787508 kB\nMemFree:         1186140 kB\nMemAvailable:   22118920 kB\n";
+
+        let (total, available) = parser
+            .parse_meminfo(Cursor::new(input))
+            .expect("meminfo should parse");
+
+        assert_eq!(total, 32_787_508);
+        assert_eq!(available, 22_118_920);
+    }
+
+    #[test]
+    fn parse_meminfo_fails_without_memavailable() {
+        let parser = Parser::new(DummyProcessParser, DummyThreadParser, DummyNetworkParser);
+        let input = "MemTotal: 1000 kB\n";
+
+        let result = parser.parse_meminfo(Cursor::new(input));
         assert!(result.is_err());
     }
 }

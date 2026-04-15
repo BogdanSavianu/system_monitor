@@ -20,7 +20,7 @@ use super::{
         GuiPersistentSettings, gui_settings_file_path, load_gui_settings, save_gui_settings,
     },
     state::{GuiPage, GuiState},
-    views::{SettingsView, render_processes_view},
+    views::{SettingsView, render_processes_view, render_system_view},
 };
 #[cfg(feature = "dioxus-gui")]
 use crate::app::factory::MonitorBuildSettings;
@@ -203,6 +203,7 @@ fn GuiApp() -> Element {
                         &state_read.network_rows,
                         &state_read.cmdline_by_pid,
                         &state_read.cpu_top_history_by_pid,
+                        &state_read.physical_mem_history_by_pid,
                         selected_pid,
                         details_expanded,
                         &view_filter_text,
@@ -219,6 +220,11 @@ fn GuiApp() -> Element {
                                 state.details_expanded = !state.details_expanded;
                             });
                         }),
+                    )}
+                } else if active_page == GuiPage::System {
+                    {render_system_view(
+                        &state_read.system_cpu_history,
+                        &state_read.system_mem_used_history_mb,
                     )}
                 } else {
                     SettingsView {

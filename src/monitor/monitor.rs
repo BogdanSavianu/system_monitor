@@ -20,6 +20,8 @@ pub struct MonitorObservation {
     pub collected_at: SystemTime,
     pub cpu: Vec<ProcessCpuSampleDTO>,
     pub network: Vec<ProcessNetworkSampleDTO>,
+    pub total_cpu_top: f64,
+    pub system_mem_used_kb: u64,
 }
 
 pub struct Monitor<
@@ -230,12 +232,20 @@ impl<
         let collected_at = SystemTime::now();
         let cpu = self.sample_cpu_usage()?;
         let network = self.sample_process_network_stats()?;
+        let total_cpu_top = cpu.iter().map(|sample| sample.cpu_top).sum::<f64>();
+        let system_status = self.parser.get_status_info()?;
+        let system_mem_used_kb = system_status
+            .mem_total_kb
+            .saturating_sub(system_status.mem_available_kb);
+
         self.persist_observation(collected_at, &cpu, &network);
 
         Ok(MonitorObservation {
             collected_at,
             cpu,
             network,
+            total_cpu_top,
+            system_mem_used_kb,
         })
     }
 

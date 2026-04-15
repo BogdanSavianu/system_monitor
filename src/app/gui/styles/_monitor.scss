@@ -6,6 +6,10 @@
   gap: 16px;
 }
 
+.main-grid-single {
+  grid-template-columns: 1fr;
+}
+
 .details-page {
   width: 100%;
 }
@@ -167,8 +171,18 @@
   height: 100%;
 }
 
+.system-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
 @media (max-width: 900px) {
   .main-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .system-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -20,6 +20,8 @@ pub struct CpuSnapshot {
     pub threads: Vec<ThreadCpuSampleDTO>,
     pub network: Vec<ProcessNetworkSampleDTO>,
     pub cmdline_by_pid: HashMap<Pid, String>,
+    pub total_cpu_top: f64,
+    pub system_mem_used_kb: u64,
 }
 
 #[derive(Debug)]
@@ -88,6 +90,8 @@ pub fn spawn_backend(
                     threads,
                     network: observation.network,
                     cmdline_by_pid,
+                    total_cpu_top: observation.total_cpu_top,
+                    system_mem_used_kb: observation.system_mem_used_kb,
                 })
             })();
 

@@ -39,11 +39,39 @@ pub async fn run_sync_loop(
                                     let overflow = history.len() - MAX_HISTORY_POINTS;
                                     history.drain(0..overflow);
                                 }
+
+                                let memory_history = state
+                                    .physical_mem_history_by_pid
+                                    .entry(row.pid)
+                                    .or_default();
+                                memory_history.push(row.physical_mem as f64 / 1000.0);
+                                if memory_history.len() > MAX_HISTORY_POINTS {
+                                    let overflow = memory_history.len() - MAX_HISTORY_POINTS;
+                                    memory_history.drain(0..overflow);
+                                }
                             }
 
                             state
                                 .cpu_top_history_by_pid
                                 .retain(|pid, _| state.rows.iter().any(|row| row.pid == *pid));
+                            state
+                                .physical_mem_history_by_pid
+                                .retain(|pid, _| state.rows.iter().any(|row| row.pid == *pid));
+
+                            state.system_cpu_history.push(snapshot.total_cpu_top);
+                            if state.system_cpu_history.len() > MAX_HISTORY_POINTS {
+                                let overflow = state.system_cpu_history.len() - MAX_HISTORY_POINTS;
+                                state.system_cpu_history.drain(0..overflow);
+                            }
+
+                            state
+                                .system_mem_used_history_mb
+                                .push(snapshot.system_mem_used_kb as f64 / 1000.0);
+                            if state.system_mem_used_history_mb.len() > MAX_HISTORY_POINTS {
+                                let overflow =
+                                    state.system_mem_used_history_mb.len() - MAX_HISTORY_POINTS;
+                                state.system_mem_used_history_mb.drain(0..overflow);
+                            }
 
                             state.status_line =
                                 format!("last sample at {:?}", snapshot.collected_at);

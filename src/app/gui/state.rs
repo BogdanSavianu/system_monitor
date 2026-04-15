@@ -7,6 +7,7 @@ use super::view_models::{NetworkRowViewModel, ProcessRowViewModel, ThreadRowView
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuiPage {
     Monitor,
+    System,
     Settings,
 }
 
@@ -17,6 +18,9 @@ pub struct GuiState {
     pub network_rows: Vec<NetworkRowViewModel>,
     pub cmdline_by_pid: HashMap<Pid, String>,
     pub cpu_top_history_by_pid: HashMap<Pid, Vec<f64>>,
+    pub physical_mem_history_by_pid: HashMap<Pid, Vec<f64>>,
+    pub system_cpu_history: Vec<f64>,
+    pub system_mem_used_history_mb: Vec<f64>,
     pub selected_pid: Option<Pid>,
     pub details_expanded: bool,
     pub active_page: GuiPage,
@@ -34,6 +38,9 @@ impl GuiState {
             network_rows: Vec::new(),
             cmdline_by_pid: HashMap::new(),
             cpu_top_history_by_pid: HashMap::new(),
+            physical_mem_history_by_pid: HashMap::new(),
+            system_cpu_history: Vec::new(),
+            system_mem_used_history_mb: Vec::new(),
             selected_pid: None,
             details_expanded: false,
             active_page: GuiPage::Monitor,

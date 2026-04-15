@@ -13,6 +13,7 @@ pub fn render_processes_view(
     network_rows: &[NetworkRowViewModel],
     cmdline_by_pid: &HashMap<Pid, String>,
     cpu_top_history_by_pid: &HashMap<Pid, Vec<f64>>,
+    physical_mem_history_by_pid: &HashMap<Pid, Vec<f64>>,
     selected_pid: Option<u32>,
     details_expanded: bool,
     filter_text: &str,
@@ -22,6 +23,7 @@ pub fn render_processes_view(
 ) -> Element {
     let filter = filter_text.to_lowercase();
     let selected_row = selected_pid.and_then(|pid| rows.iter().find(|row| row.pid == pid));
+    let has_selected_row = selected_row.is_some();
     let mut selected_threads: Vec<_> = selected_pid
         .map(|pid| {
             thread_rows
@@ -38,9 +40,12 @@ pub fn render_processes_view(
     let selected_cpu_history = selected_pid
         .and_then(|pid| cpu_top_history_by_pid.get(&pid).map(Vec::as_slice))
         .unwrap_or(&[]);
+    let selected_mem_history = selected_pid
+        .and_then(|pid| physical_mem_history_by_pid.get(&pid).map(Vec::as_slice))
+        .unwrap_or(&[]);
 
     rsx! {
-        if details_expanded {
+        if details_expanded && has_selected_row {
             div {
                 class: "details-page",
                 {render_process_details(
@@ -49,13 +54,18 @@ pub fn render_processes_view(
                     selected_network,
                     selected_cmdline,
                     selected_cpu_history,
+                    selected_mem_history,
                     details_expanded,
                     on_toggle_details,
                 )}
             }
         } else {
             div {
-                class: "main-grid",
+                class: if has_selected_row {
+                    "main-grid"
+                } else {
+                    "main-grid main-grid-single"
+                },
 
                 div {
                     class: "list-panel",
@@ -91,15 +101,18 @@ pub fn render_processes_view(
                     }
                 }
 
-                {render_process_details(
-                    selected_row,
-                    &selected_threads,
-                    selected_network,
-                    selected_cmdline,
-                    selected_cpu_history,
-                    details_expanded,
-                    on_toggle_details,
-                )}
+                if has_selected_row {
+                    {render_process_details(
+                        selected_row,
+                        &selected_threads,
+                        selected_network,
+                        selected_cmdline,
+                        selected_cpu_history,
+                        selected_mem_history,
+                        details_expanded,
+                        on_toggle_details,
+                    )}
+                }
             }
         }
     }
