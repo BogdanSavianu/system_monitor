@@ -31,8 +31,10 @@ pub fn render_processes_view(
         })
         .unwrap_or_default();
     selected_threads.sort_by(|a, b| b.cpu_top.total_cmp(&a.cpu_top));
-    let selected_network = selected_pid.and_then(|pid| network_rows.iter().find(|row| row.pid == pid));
-    let selected_cmdline = selected_pid.and_then(|pid| cmdline_by_pid.get(&pid).map(String::as_str));
+    let selected_network =
+        selected_pid.and_then(|pid| network_rows.iter().find(|row| row.pid == pid));
+    let selected_cmdline =
+        selected_pid.and_then(|pid| cmdline_by_pid.get(&pid).map(String::as_str));
     let selected_cpu_history = selected_pid
         .and_then(|pid| cpu_top_history_by_pid.get(&pid).map(Vec::as_slice))
         .unwrap_or(&[]);
