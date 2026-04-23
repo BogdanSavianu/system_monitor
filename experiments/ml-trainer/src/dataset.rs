@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
-use crate::util::ParseError;
-
-use super::features::TelemetrySample;
+use crate::features::TelemetrySample;
 
 #[derive(Debug, Clone)]
 pub struct LabeledRun {
@@ -24,7 +24,51 @@ struct CsvRow {
     workload_kb_this_step: f64,
 }
 
-pub fn load_runs_from_csv_paths(paths: &[String]) -> Result<Vec<LabeledRun>, ParseError> {
+pub fn csv_paths_from_manifest<P: AsRef<Path>>(manifest: P) -> Result<Vec<String>> {
+    let manifest_ref = manifest.as_ref();
+    let content = fs::read_to_string(manifest_ref)
+        .with_context(|| format!("failed to read manifest '{}'", manifest_ref.display()))?;
+
+    let paths = content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    if paths.is_empty() {
+        bail!(
+            "manifest '{}' contains no csv paths",
+            manifest_ref.display()
+        );
+    }
+
+    Ok(paths)
+}
+
+pub fn csv_paths_from_dir<P: AsRef<Path>>(dir: P) -> Result<Vec<String>> {
+    let dir_ref = dir.as_ref();
+    let mut paths = Vec::new();
+
+    for entry in fs::read_dir(dir_ref)
+        .with_context(|| format!("failed to read dataset directory '{}'", dir_ref.display()))?
+    {
+        let entry = entry?;
+        let path: PathBuf = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("csv") {
+            paths.push(path.display().to_string());
+        }
+    }
+
+    paths.sort();
+    if paths.is_empty() {
+        bail!("no csv files found in '{}'", dir_ref.display());
+    }
+
+    Ok(paths)
+}
+
+pub fn load_runs_from_csv_paths(paths: &[String]) -> Result<Vec<LabeledRun>> {
     let mut all_runs = Vec::new();
     for path in paths {
         let mut runs = load_runs_from_csv(path)?;
@@ -33,26 +77,16 @@ pub fn load_runs_from_csv_paths(paths: &[String]) -> Result<Vec<LabeledRun>, Par
     Ok(all_runs)
 }
 
-pub fn load_runs_from_csv<P: AsRef<Path>>(path: P) -> Result<Vec<LabeledRun>, ParseError> {
+pub fn load_runs_from_csv<P: AsRef<Path>>(path: P) -> Result<Vec<LabeledRun>> {
     let path_ref = path.as_ref();
     let source_key = path_ref.display().to_string();
-    let mut reader = csv::Reader::from_path(path_ref).map_err(|err| {
-        ParseError::ParsingError(format!(
-            "failed to open csv '{}': {}",
-            path_ref.display(),
-            err
-        ))
-    })?;
+    let mut reader = csv::Reader::from_path(path_ref)
+        .with_context(|| format!("failed to open csv '{}'", path_ref.display()))?;
 
     let mut grouped: BTreeMap<String, Vec<CsvRow>> = BTreeMap::new();
     for row in reader.deserialize::<CsvRow>() {
-        let parsed = row.map_err(|err| {
-            ParseError::ParsingError(format!(
-                "failed to parse csv row in '{}': {}",
-                path_ref.display(),
-                err
-            ))
-        })?;
+        let parsed =
+            row.with_context(|| format!("failed to parse row in '{}'", path_ref.display()))?;
         let scoped_run_id = format!("{}::{}", source_key, parsed.run_id);
         grouped.entry(scoped_run_id).or_default().push(parsed);
     }

@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Train anomaly model over a dataset directory and log metrics.
-# Usage:
-#   ./experiments/leaks/train.sh [dataset_dir] [window] [train_ratio]
-
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DATASET_DIR="${1:-$ROOT_DIR/experiments/dataset_large}"
 WINDOW="${2:-24}"
@@ -20,21 +16,34 @@ if [[ ! -f "$MANIFEST" ]]; then
   find "$DATASET_DIR" -maxdepth 1 -type f -name '*.csv' | sort > "$MANIFEST"
 fi
 
-CSV_LIST="$(paste -sd, "$MANIFEST")"
-if [[ -z "$CSV_LIST" ]]; then
+CSV_COUNT="$(wc -l < "$MANIFEST" | tr -d ' ')"
+if [[ "$CSV_COUNT" -eq 0 ]]; then
   echo "no csv files found in: $DATASET_DIR" >&2
   exit 1
 fi
 
+TOTAL_ROWS=0
+while IFS= read -r csv; do
+  rows="$(awk 'END { if (NR > 0) print NR - 1; else print 0 }' "$csv")"
+  TOTAL_ROWS=$((TOTAL_ROWS + rows))
+done < "$MANIFEST"
+
 LOG_PATH="$DATASET_DIR/training_$(date +%Y%m%d_%H%M%S).log"
+REPORT_PATH="$DATASET_DIR/model_report.json"
 
 echo "training with window=$WINDOW train_ratio=$TRAIN_RATIO"
 echo "dataset=$DATASET_DIR"
+echo "input_csv_files=$CSV_COUNT input_rows=$TOTAL_ROWS"
 echo "log=$LOG_PATH"
+echo "report=$REPORT_PATH"
 
 (
   cd "$ROOT_DIR"
-  cargo run --release -- --train-anomaly="$CSV_LIST" --window="$WINDOW" --train-ratio="$TRAIN_RATIO"
+  cargo run --release --manifest-path experiments/ml-trainer/Cargo.toml -- \
+    --manifest "$MANIFEST" \
+    --window "$WINDOW" \
+    --train-ratio "$TRAIN_RATIO" \
+    --out "$REPORT_PATH"
 ) | tee "$LOG_PATH"
 
 echo "training log saved to $LOG_PATH"

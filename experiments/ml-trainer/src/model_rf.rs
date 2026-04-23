@@ -4,7 +4,7 @@ use smartcore::ensemble::random_forest_classifier::{
 use smartcore::error::Failed;
 use smartcore::linalg::basic::matrix::DenseMatrix;
 
-use super::features::FeatureRow;
+use crate::features::FeatureRow;
 
 #[derive(Debug, Clone)]
 pub struct RandomForestConfig {
@@ -16,8 +16,8 @@ pub struct RandomForestConfig {
 impl Default for RandomForestConfig {
     fn default() -> Self {
         Self {
-            n_trees: 200,
-            max_depth: Some(12),
+            n_trees: 300,
+            max_depth: Some(16),
             min_samples_split: 4,
         }
     }
@@ -25,38 +25,34 @@ impl Default for RandomForestConfig {
 
 #[derive(Debug)]
 pub struct RandomForestModel {
-    pub config: RandomForestConfig,
     model: RandomForestClassifier<f64, u32, DenseMatrix<f64>, Vec<u32>>,
 }
 
 impl RandomForestModel {
-    pub fn train(rows: &[FeatureRow], config: RandomForestConfig) -> Result<Self, Failed> {
+    pub fn train(rows: &[FeatureRow], config: &RandomForestConfig) -> Result<Self, Failed> {
         let x = rows.iter().map(|r| r.as_vec()).collect::<Vec<_>>();
         let y = rows.iter().map(|r| r.label as u32).collect::<Vec<_>>();
 
         let x = DenseMatrix::from_2d_vec(&x)?;
-        let mut params = RandomForestClassifierParameters::default();
-        params.n_trees = config.n_trees as u16;
-        params.min_samples_split = config.min_samples_split;
-        params.max_depth = config.max_depth.map(|d| d as u16);
+        let params = RandomForestClassifierParameters {
+            criterion: Default::default(),
+            max_depth: config.max_depth.map(|d| d as u16),
+            min_samples_leaf: 1,
+            min_samples_split: config.min_samples_split,
+            n_trees: config.n_trees as u16,
+            m: None,
+            keep_samples: false,
+            seed: 42,
+        };
 
         let model = RandomForestClassifier::fit(&x, &y, params)?;
-
-        Ok(Self { config, model })
-    }
-
-    pub fn predict_label(&self, row: &FeatureRow) -> Result<u8, Failed> {
-        let row = vec![row.as_vec()];
-        let x = DenseMatrix::from_2d_vec(&row)?;
-        let pred = self.model.predict(&x)?;
-        Ok(pred.first().copied().unwrap_or(0) as u8)
+        Ok(Self { model })
     }
 
     pub fn predict_labels(&self, rows: &[FeatureRow]) -> Result<Vec<u8>, Failed> {
         let x = rows.iter().map(|r| r.as_vec()).collect::<Vec<_>>();
         let x = DenseMatrix::from_2d_vec(&x)?;
         let pred = self.model.predict(&x)?;
-
         Ok(pred.into_iter().map(|v| v as u8).collect())
     }
 }
