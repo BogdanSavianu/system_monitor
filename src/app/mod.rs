@@ -1,3 +1,4 @@
+mod anomaly_train;
 mod args;
 mod factory;
 mod gui;
@@ -51,6 +52,11 @@ pub fn run() -> Result<(), ParseError> {
     if args::is_worker_mode_requested() {
         info!(target: "app::runtime", "starting in worker mode");
         return worker::run_interactive_worker_mode();
+    }
+
+    if let Some(train_args) = args::parse_train_anomaly_args()? {
+        info!(target: "app::runtime", "starting anomaly training mode");
+        return anomaly_train::run_training(&train_args);
     }
 
     let parsed = args::parse_args()?;

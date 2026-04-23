@@ -11,6 +11,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"
+csv = "1.4"
+smartcore = "0.4"
 dioxus = { version = "0.7", optional = true, features = ["desktop"] }
 dioxus-desktop = { version = "0.7", optional = true }
 native-tls = { version = "0.2", optional = true, features = ["vendored"] }
