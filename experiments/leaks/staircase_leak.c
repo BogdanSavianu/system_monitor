@@ -2,8 +2,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "run_id.h"
 
 uint64_t parse_u64(const char *s, const char *name) {
     unsigned long long v = 0;
@@ -28,8 +31,7 @@ int main(int argc, char **argv) {
     const char *scenario = "staircase_leak";
     const int label = 1;
     time_t start_epoch_s = time(NULL);
-    unsigned long long run_id =
-        (unsigned long long)start_epoch_s ^ (unsigned long long)getpid();
+    unsigned long long run_id = make_run_id();
 
     FILE *csv = NULL;
     if (argc == 6) {
