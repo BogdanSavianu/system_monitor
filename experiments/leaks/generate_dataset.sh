@@ -28,7 +28,7 @@ make -C "$LEAKS_DIR"
 echo "[2/3] generating dataset in $OUT_DIR with jobs=$JOBS"
 for i in $(seq 1 "$RUNS_PER_SCENARIO"); do
   (
-    run_seed="$(date +%s%N)-$BASHPID-$i"
+    run_seed="$(date +%s)-$i-$$-$RANDOM-$RANDOM"
 
     steady_kb="$(rand_range 24 44)"
 
