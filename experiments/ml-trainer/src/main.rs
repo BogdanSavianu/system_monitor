@@ -20,6 +20,8 @@ use crate::model_rf::{RandomForestConfig, RandomForestModel};
 struct Args {
     dataset_dir: Option<String>,
     manifest: Option<String>,
+    valid_dataset_dir: Option<String>,
+    valid_manifest: Option<String>,
     window: usize,
     train_ratio: f64,
     out: Option<String>,
@@ -27,6 +29,7 @@ struct Args {
 
 #[derive(Debug, Serialize)]
 struct TrainingReport {
+    split_mode: String,
     train_runs: usize,
     valid_runs: usize,
     train_rows: usize,
@@ -42,6 +45,8 @@ struct TrainingReport {
 fn parse_args() -> Result<Args> {
     let mut dataset_dir: Option<String> = None;
     let mut manifest: Option<String> = None;
+    let mut valid_dataset_dir: Option<String> = None;
+    let mut valid_manifest: Option<String> = None;
     let mut window: usize = 24;
     let mut train_ratio: f64 = 0.8;
     let mut out: Option<String> = None;
@@ -71,6 +76,32 @@ fn parse_args() -> Result<Args> {
         }
         if let Some(value) = arg.strip_prefix("--manifest=") {
             manifest = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+
+        if arg == "--valid-dataset-dir" {
+            let value = args
+                .get(i + 1)
+                .context("--valid-dataset-dir expects a value")?;
+            valid_dataset_dir = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--valid-dataset-dir=") {
+            valid_dataset_dir = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+
+        if arg == "--valid-manifest" {
+            let value = args.get(i + 1).context("--valid-manifest expects a value")?;
+            valid_manifest = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--valid-manifest=") {
+            valid_manifest = Some(value.to_string());
             i += 1;
             continue;
         }
@@ -128,6 +159,9 @@ fn parse_args() -> Result<Args> {
     if !(0.1..=0.95).contains(&train_ratio) {
         bail!("--train-ratio must be in [0.1, 0.95]");
     }
+    if valid_dataset_dir.is_some() && valid_manifest.is_some() {
+        bail!("provide only one of --valid-dataset-dir or --valid-manifest");
+    }
     if dataset_dir.is_none() && manifest.is_none() {
         dataset_dir = Some("./experiments/dataset_large".to_string());
     }
@@ -135,28 +169,58 @@ fn parse_args() -> Result<Args> {
     Ok(Args {
         dataset_dir,
         manifest,
+        valid_dataset_dir,
+        valid_manifest,
         window,
         train_ratio,
         out,
     })
 }
 
+fn csv_paths_from_args(
+    dataset_dir: &Option<String>,
+    manifest: &Option<String>,
+    default_dir: &str,
+) -> Result<Vec<String>> {
+    if let Some(manifest_path) = manifest {
+        csv_paths_from_manifest(manifest_path)
+    } else {
+        let dir = dataset_dir.as_deref().unwrap_or(default_dir);
+        csv_paths_from_dir(dir)
+    }
+}
+
 fn run() -> Result<()> {
     let args = parse_args()?;
 
-    let csv_paths = if let Some(manifest) = &args.manifest {
-        csv_paths_from_manifest(manifest)?
+    let train_csv_paths = csv_paths_from_args(&args.dataset_dir, &args.manifest, "./experiments/dataset_large")?;
+    let train_source_runs = load_runs_from_csv_paths(&train_csv_paths)?;
+
+    let (split_mode, train_runs, valid_runs) = if args.valid_manifest.is_some() || args.valid_dataset_dir.is_some() {
+        let valid_csv_paths = csv_paths_from_args(
+            &args.valid_dataset_dir,
+            &args.valid_manifest,
+            "./experiments/dataset_large",
+        )?;
+        let valid_source_runs = load_runs_from_csv_paths(&valid_csv_paths)?;
+        if train_source_runs.is_empty() {
+            bail!("training dataset has no runs");
+        }
+        if valid_source_runs.is_empty() {
+            bail!("validation dataset has no runs");
+        }
+        (
+            "external_validation_dataset".to_string(),
+            train_source_runs,
+            valid_source_runs,
+        )
     } else {
-        let dir = args.dataset_dir.as_deref().unwrap_or("./experiments/dataset_large");
-        csv_paths_from_dir(dir)?
+        if train_source_runs.len() < 2 {
+            bail!("need at least 2 runs for train/validation split");
+        }
+        let (train, valid) = split_runs_by_ratio(train_source_runs, args.train_ratio);
+        ("in_dataset_run_split".to_string(), train, valid)
     };
-
-    let runs = load_runs_from_csv_paths(&csv_paths)?;
-    if runs.len() < 2 {
-        bail!("need at least 2 runs for train/validation split");
-    }
-
-    let (train_runs, valid_runs) = split_runs_by_ratio(runs, args.train_ratio);
 
     let train_rows = train_runs
         .iter()
@@ -192,6 +256,7 @@ fn run() -> Result<()> {
     let metrics = binary_metrics(&y_true, &y_pred);
 
     println!("ml-trainer complete");
+    println!("split_mode={}", split_mode);
     println!(
         "train_runs={} valid_runs={}",
         train_runs.len(),
@@ -210,6 +275,7 @@ fn run() -> Result<()> {
 
     if let Some(path) = args.out {
         let report = TrainingReport {
+            split_mode,
             train_runs: train_runs.len(),
             valid_runs: valid_runs.len(),
             train_rows: train_rows.len(),
