@@ -7,6 +7,8 @@ WINDOW="${2:-24}"
 TRAIN_RATIO="${3:-0.8}"
 VALID_DATASET_DIR="${4:-}"
 FEATURE_SET="${5:-full}"
+SPLIT_POLICY="${6:-run}"
+SANITY_MODE="${7:-off}"
 
 if [[ ! -d "$DATASET_DIR" ]]; then
   echo "dataset dir not found: $DATASET_DIR" >&2
@@ -69,8 +71,9 @@ fi
 if [[ -n "$VALID_MANIFEST" ]]; then
   echo "training with window=$WINDOW mode=external_validation_dataset feature_set=$FEATURE_SET"
 else
-  echo "training with window=$WINDOW train_ratio=$TRAIN_RATIO mode=in_dataset_run_split feature_set=$FEATURE_SET"
+  echo "training with window=$WINDOW train_ratio=$TRAIN_RATIO mode=in_dataset_run_split feature_set=$FEATURE_SET split_policy=$SPLIT_POLICY"
 fi
+echo "sanity_checks=$SANITY_MODE"
 echo "dataset=$DATASET_DIR"
 echo "input_csv_files=$CSV_COUNT input_rows=$TOTAL_ROWS"
 if [[ -n "$VALID_MANIFEST" ]]; then
@@ -83,6 +86,11 @@ echo "model=$MODEL_PATH"
 
 (
   cd "$ROOT_DIR"
+  SANITY_ARG=()
+  if [[ "$SANITY_MODE" == "on" || "$SANITY_MODE" == "1" || "$SANITY_MODE" == "true" ]]; then
+    SANITY_ARG=(--run-sanity-checks)
+  fi
+
   if [[ -n "$VALID_MANIFEST" ]]; then
     cargo run --release --manifest-path experiments/ml-trainer/Cargo.toml -- \
       --manifest "$MANIFEST" \
@@ -90,14 +98,17 @@ echo "model=$MODEL_PATH"
       --feature-set "$FEATURE_SET" \
       --window "$WINDOW" \
       --model-out "$MODEL_PATH" \
+      "${SANITY_ARG[@]}" \
       --out "$REPORT_PATH"
   else
     cargo run --release --manifest-path experiments/ml-trainer/Cargo.toml -- \
       --manifest "$MANIFEST" \
       --feature-set "$FEATURE_SET" \
+      --split-policy "$SPLIT_POLICY" \
       --window "$WINDOW" \
       --train-ratio "$TRAIN_RATIO" \
       --model-out "$MODEL_PATH" \
+      "${SANITY_ARG[@]}" \
       --out "$REPORT_PATH"
   fi
 ) | tee "$LOG_PATH"

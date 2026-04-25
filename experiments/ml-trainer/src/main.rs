@@ -10,11 +10,49 @@ use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
 use crate::dataset::{
-    csv_paths_from_dir, csv_paths_from_manifest, load_runs_from_csv_paths, split_runs_by_ratio,
+    csv_paths_from_dir, csv_paths_from_manifest, load_runs_from_csv_paths,
+    split_runs_by_ratio, split_runs_validation_scenarios,
 };
 use crate::eval::binary_metrics;
 use crate::features::{FeatureSet, build_feature_rows};
 use crate::model_rf::{RandomForestConfig, RandomForestModel};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SplitPolicy {
+    Run,
+    ScenarioValidation,
+}
+
+impl SplitPolicy {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "run" => Some(Self::Run),
+            "scenario_validation" => Some(Self::ScenarioValidation),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Run => "run",
+            Self::ScenarioValidation => "scenario_validation",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct SanityReport {
+    threshold_baseline: MetricsReport,
+    shuffled_labels_model: MetricsReport,
+}
+
+#[derive(Debug, Serialize)]
+struct MetricsReport {
+    accuracy: f64,
+    precision: f64,
+    recall: f64,
+    f1: f64,
+}
 
 #[derive(Debug, Clone)]
 struct Args {
@@ -25,6 +63,8 @@ struct Args {
     model_in: Option<String>,
     model_out: Option<String>,
     feature_set: FeatureSet,
+    split_policy: SplitPolicy,
+    run_sanity_checks: bool,
     window: usize,
     train_ratio: f64,
     out: Option<String>,
@@ -33,9 +73,11 @@ struct Args {
 #[derive(Debug, Serialize)]
 struct TrainingReport {
     split_mode: String,
+    split_policy: String,
     feature_set: String,
     model_in: Option<String>,
     model_out: Option<String>,
+    sanity: Option<SanityReport>,
     train_runs: usize,
     valid_runs: usize,
     train_rows: usize,
@@ -56,6 +98,8 @@ fn parse_args() -> Result<Args> {
     let mut model_in: Option<String> = None;
     let mut model_out: Option<String> = None;
     let mut feature_set = FeatureSet::Full;
+    let mut split_policy = SplitPolicy::Run;
+    let mut run_sanity_checks = false;
     let mut window: usize = 24;
     let mut train_ratio: f64 = 0.8;
     let mut out: Option<String> = None;
@@ -155,6 +199,26 @@ fn parse_args() -> Result<Args> {
             continue;
         }
 
+        if arg == "--split-policy" {
+            let value = args.get(i + 1).context("--split-policy expects a value")?;
+            split_policy = SplitPolicy::parse(value)
+                .with_context(|| format!("invalid --split-policy value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--split-policy=") {
+            split_policy = SplitPolicy::parse(value)
+                .with_context(|| format!("invalid --split-policy value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--run-sanity-checks" {
+            run_sanity_checks = true;
+            i += 1;
+            continue;
+        }
+
         if arg == "--window" {
             let value = args.get(i + 1).context("--window expects a value")?;
             window = value
@@ -231,6 +295,8 @@ fn parse_args() -> Result<Args> {
         model_in,
         model_out,
         feature_set,
+        split_policy,
+        run_sanity_checks,
         window,
         train_ratio,
         out,
@@ -254,6 +320,10 @@ fn run() -> Result<()> {
     let args = parse_args()?;
 
     if let Some(model_path) = &args.model_in {
+        let model = RandomForestModel::load_from_path(model_path)
+            .with_context(|| format!("failed to load model from '{}'", model_path))?;
+        let eval_feature_set = FeatureSet::parse(model.feature_set_name()).unwrap_or(FeatureSet::Full);
+
         let eval_csv_paths = csv_paths_from_args(
             &args.dataset_dir,
             &args.manifest,
@@ -266,7 +336,7 @@ fn run() -> Result<()> {
 
         let eval_rows = eval_runs
             .iter()
-            .flat_map(|r| build_feature_rows(&r.samples, args.window))
+            .flat_map(|r| build_feature_rows(&r.samples, args.window, eval_feature_set))
             .collect::<Vec<_>>();
         if eval_rows.is_empty() {
             bail!(
@@ -274,8 +344,6 @@ fn run() -> Result<()> {
             );
         }
 
-        let model = RandomForestModel::load_from_path(model_path)
-            .with_context(|| format!("failed to load model from '{}'", model_path))?;
         let y_true = eval_rows.iter().map(|r| r.label).collect::<Vec<_>>();
         let y_pred = model
             .predict_labels(&eval_rows)
@@ -301,9 +369,11 @@ fn run() -> Result<()> {
         if let Some(path) = args.out {
             let report = TrainingReport {
                 split_mode,
+                split_policy: "n/a".to_string(),
                 feature_set: model.feature_set_name().to_string(),
                 model_in: Some(model_path.clone()),
                 model_out: None,
+                sanity: None,
                 train_runs: 0,
                 valid_runs: eval_runs.len(),
                 train_rows: 0,
@@ -354,17 +424,22 @@ fn run() -> Result<()> {
             if train_source_runs.len() < 2 {
                 bail!("need at least 2 runs for train/validation split");
             }
-            let (train, valid) = split_runs_by_ratio(train_source_runs, args.train_ratio);
+            let (train, valid) = match args.split_policy {
+                SplitPolicy::Run => split_runs_by_ratio(train_source_runs, args.train_ratio),
+                SplitPolicy::ScenarioValidation => {
+                    split_runs_validation_scenarios(train_source_runs, args.train_ratio)
+                }
+            };
             ("in_dataset_run_split".to_string(), train, valid)
         };
 
     let train_rows = train_runs
         .iter()
-        .flat_map(|r| build_feature_rows(&r.samples, args.window))
+            .flat_map(|r| build_feature_rows(&r.samples, args.window, args.feature_set))
         .collect::<Vec<_>>();
     let valid_rows = valid_runs
         .iter()
-        .flat_map(|r| build_feature_rows(&r.samples, args.window))
+            .flat_map(|r| build_feature_rows(&r.samples, args.window, args.feature_set))
         .collect::<Vec<_>>();
 
     if train_rows.is_empty() || valid_rows.is_empty() {
@@ -403,6 +478,7 @@ fn run() -> Result<()> {
 
     println!("ml-trainer complete");
     println!("split_mode={}", split_mode);
+    println!("split_policy={}", args.split_policy.as_str());
     println!("feature_set={}", args.feature_set.as_str());
     println!(
         "train_runs={} valid_runs={}",
@@ -420,12 +496,60 @@ fn run() -> Result<()> {
         metrics.accuracy, metrics.precision, metrics.recall, metrics.f1
     );
 
+    let sanity = if args.run_sanity_checks {
+        let baseline_pred = threshold_baseline_predictions(&train_rows, &valid_rows, args.feature_set);
+        let baseline_true = valid_rows.iter().map(|r| r.label).collect::<Vec<_>>();
+        let baseline_metrics = binary_metrics(&baseline_true, &baseline_pred);
+
+        let shuffled_rows = shuffled_label_rows(&train_rows);
+        let shuffled_model = RandomForestModel::train(&shuffled_rows, &rf_config, args.feature_set)
+            .context("random forest sanity training failed")?;
+        let shuffled_pred = shuffled_model
+            .predict_labels(&valid_rows)
+            .context("sanity prediction failed")?;
+        let shuffled_metrics = binary_metrics(&baseline_true, &shuffled_pred);
+
+        println!(
+            "sanity_threshold accuracy={:.4} precision={:.4} recall={:.4} f1={:.4}",
+            baseline_metrics.accuracy,
+            baseline_metrics.precision,
+            baseline_metrics.recall,
+            baseline_metrics.f1
+        );
+        println!(
+            "sanity_shuffled accuracy={:.4} precision={:.4} recall={:.4} f1={:.4}",
+            shuffled_metrics.accuracy,
+            shuffled_metrics.precision,
+            shuffled_metrics.recall,
+            shuffled_metrics.f1
+        );
+
+        Some(SanityReport {
+            threshold_baseline: MetricsReport {
+                accuracy: baseline_metrics.accuracy,
+                precision: baseline_metrics.precision,
+                recall: baseline_metrics.recall,
+                f1: baseline_metrics.f1,
+            },
+            shuffled_labels_model: MetricsReport {
+                accuracy: shuffled_metrics.accuracy,
+                precision: shuffled_metrics.precision,
+                recall: shuffled_metrics.recall,
+                f1: shuffled_metrics.f1,
+            },
+        })
+    } else {
+        None
+    };
+
     if let Some(path) = args.out {
         let report = TrainingReport {
             split_mode,
+            split_policy: args.split_policy.as_str().to_string(),
             feature_set: args.feature_set.as_str().to_string(),
             model_in: None,
             model_out: args.model_out,
+            sanity,
             train_runs: train_runs.len(),
             valid_runs: valid_runs.len(),
             train_rows: train_rows.len(),
@@ -444,6 +568,66 @@ fn run() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn shuffled_label_rows(rows: &[crate::features::FeatureRow]) -> Vec<crate::features::FeatureRow> {
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    let labels = rows.iter().map(|r| r.label).collect::<Vec<_>>();
+    let shift = (rows.len() / 3).max(1) % rows.len();
+    rows.iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let mut c = r.clone();
+            c.label = labels[(i + shift) % labels.len()];
+            c
+        })
+        .collect::<Vec<_>>()
+}
+
+fn threshold_baseline_predictions(
+    train_rows: &[crate::features::FeatureRow],
+    valid_rows: &[crate::features::FeatureRow],
+    feature_set: FeatureSet,
+) -> Vec<u8> {
+    if train_rows.is_empty() || valid_rows.is_empty() {
+        return Vec::new();
+    }
+
+    let train_pairs = train_rows
+        .iter()
+        .map(|r| (r.as_vec(feature_set).first().copied().unwrap_or(0.0), r.label))
+        .collect::<Vec<_>>();
+    let mut candidates = train_pairs.iter().map(|(v, _)| *v).collect::<Vec<_>>();
+    candidates.sort_by(|a, b| a.total_cmp(b));
+
+    let mut best_threshold = *candidates.first().unwrap_or(&0.0);
+    let mut best_f1 = -1.0f64;
+    for threshold in candidates.iter().step_by((candidates.len() / 64).max(1)) {
+        let pred = train_pairs
+            .iter()
+            .map(|(v, _)| if *v >= *threshold { 1 } else { 0 })
+            .collect::<Vec<_>>();
+        let y_true = train_pairs.iter().map(|(_, y)| *y).collect::<Vec<_>>();
+        let m = binary_metrics(&y_true, &pred);
+        if m.f1 > best_f1 {
+            best_f1 = m.f1;
+            best_threshold = *threshold;
+        }
+    }
+
+    valid_rows
+        .iter()
+        .map(|r| {
+            let v = r.as_vec(feature_set).first().copied().unwrap_or(0.0);
+            if v >= best_threshold {
+                1
+            } else {
+                0
+            }
+        })
+        .collect::<Vec<_>>()
 }
 
 fn main() {

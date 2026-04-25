@@ -27,6 +27,7 @@ pub struct TelemetrySample {
     pub leaked_kb_step: f64,
     pub leaked_kb_total: f64,
     pub workload_kb_this_step: f64,
+    pub observed_memory_kb: f64,
     pub label: u8,
 }
 
@@ -60,7 +61,11 @@ impl FeatureRow {
     }
 }
 
-pub fn build_feature_rows(samples: &[TelemetrySample], window: usize) -> Vec<FeatureRow> {
+pub fn build_feature_rows(
+    samples: &[TelemetrySample],
+    window: usize,
+    feature_set: FeatureSet,
+) -> Vec<FeatureRow> {
     if window < 2 || samples.len() < window {
         return Vec::new();
     }
@@ -73,11 +78,18 @@ pub fn build_feature_rows(samples: &[TelemetrySample], window: usize) -> Vec<Fea
         let x1 = w.last().map(|s| s.elapsed_s).unwrap_or(0.0);
         let y0 = w.first().map(|s| s.leaked_kb_total).unwrap_or(0.0);
         let y1 = w.last().map(|s| s.leaked_kb_total).unwrap_or(0.0);
+        let m0 = w.first().map(|s| s.observed_memory_kb).unwrap_or(0.0);
+        let m1 = w.last().map(|s| s.observed_memory_kb).unwrap_or(0.0);
 
-        let memory_slope = if (x1 - x0).abs() < f64::EPSILON {
+        let leak_memory_slope = if (x1 - x0).abs() < f64::EPSILON {
             0.0
         } else {
             (y1 - y0) / (x1 - x0)
+        };
+        let observed_memory_slope = if (x1 - x0).abs() < f64::EPSILON {
+            0.0
+        } else {
+            (m1 - m0) / (x1 - x0)
         };
 
         let mut delta_sum = 0.0;
@@ -93,12 +105,23 @@ pub fn build_feature_rows(samples: &[TelemetrySample], window: usize) -> Vec<Fea
             }
         }
 
+        let mut observed_delta_sum = 0.0;
+        let mut observed_delta_max = 0.0;
+        for pair in w.windows(2) {
+            let d = (pair[1].observed_memory_kb - pair[0].observed_memory_kb).max(0.0);
+            observed_delta_sum += d;
+            if d > observed_delta_max {
+                observed_delta_max = d;
+            }
+        }
+
         for s in w {
             workload_sum += s.workload_kb_this_step;
             leak_step_sum += s.leaked_kb_step;
         }
 
-        let memory_delta_mean = delta_sum / (window - 1) as f64;
+        let leak_delta_mean = delta_sum / (window - 1) as f64;
+        let observed_delta_mean = observed_delta_sum / (window - 1) as f64;
         let workload_mean = workload_sum / window as f64;
         let leak_ratio = if workload_sum <= 0.0 {
             0.0
@@ -106,10 +129,17 @@ pub fn build_feature_rows(samples: &[TelemetrySample], window: usize) -> Vec<Fea
             leak_step_sum / workload_sum
         };
 
+        let (memory_slope, memory_delta_mean, memory_delta_max) = match feature_set {
+            FeatureSet::Full => (leak_memory_slope, leak_delta_mean, delta_max),
+            FeatureSet::Realistic => {
+                (observed_memory_slope, observed_delta_mean, observed_delta_max)
+            }
+        };
+
         rows.push(FeatureRow {
             memory_slope,
             memory_delta_mean,
-            memory_delta_max: delta_max,
+            memory_delta_max,
             workload_mean,
             leak_ratio,
             label: w.last().map(|s| s.label).unwrap_or(0),

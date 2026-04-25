@@ -27,7 +27,9 @@ echo "[1/2] train on train, validate on valid (feature_set=realistic)"
   "$WINDOW" \
   "$TRAIN_RATIO" \
   "$VALID_DATASET_DIR" \
-  realistic
+  realistic \
+  run \
+  on
 
 MODEL_PATH="$TRAIN_DATASET_DIR/model_external.json"
 if [[ ! -f "$MODEL_PATH" ]]; then

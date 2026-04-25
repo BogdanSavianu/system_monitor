@@ -64,17 +64,20 @@ for i in $(seq 1 "$RUNS_PER_SCENARIO"); do
     run_scenario() {
       "$@" &
       scenario_pids+=("$!")
+      scenario_pids_count=$((scenario_pids_count + 1))
 
-      if (( ${#scenario_pids[@]} >= SCENARIO_JOBS )); then
+      if (( scenario_pids_count >= SCENARIO_JOBS )); then
         for pid in "${scenario_pids[@]}"; do
           wait "$pid" || scenario_failed=1
         done
         scenario_pids=()
+        scenario_pids_count=0
       fi
     }
 
     scenario_failed=0
     scenario_pids=()
+    scenario_pids_count=0
 
     # positive class runs - label=1
     run_scenario env LEAK_RUN_SEED="${run_seed}:steady" "$LEAKS_DIR/steady_leak" "$steady_kb" 1 "$STEPS" "$OUT_DIR/steady_r${i}.csv"
@@ -87,9 +90,11 @@ for i in $(seq 1 "$RUNS_PER_SCENARIO"); do
     run_scenario env LEAK_RUN_SEED="${run_seed}:control" "$LEAKS_DIR/control_workload" "$control_allocs" "$control_kb_per_alloc" "$control_burst_every" 1 "$STEPS" "$OUT_DIR/control_r${i}.csv"
     run_scenario env LEAK_RUN_SEED="${run_seed}:spiky_stable" "$LEAKS_DIR/cpu_spiky_stable_mem" "$spiky_base_kb" "$spiky_every" "$spiky_ms" 1 "$STEPS" "$OUT_DIR/spiky_stable_r${i}.csv"
 
-    for pid in "${scenario_pids[@]}"; do
-      wait "$pid" || scenario_failed=1
-    done
+    if (( scenario_pids_count > 0 )); then
+      for pid in "${scenario_pids[@]}"; do
+        wait "$pid" || scenario_failed=1
+      done
+    fi
 
     if (( scenario_failed != 0 )); then
       echo "run batch $i failed" >&2
