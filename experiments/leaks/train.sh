@@ -62,9 +62,11 @@ TS="$(date +%Y%m%d_%H%M%S)"
 if [[ -n "$VALID_MANIFEST" ]]; then
   LOG_PATH="$DATASET_DIR/training_external_${TS}.log"
   REPORT_PATH="$DATASET_DIR/model_report_external.json"
+  MODEL_PATH="$DATASET_DIR/model_external.json"
 else
   LOG_PATH="$DATASET_DIR/training_split_${TS}.log"
   REPORT_PATH="$DATASET_DIR/model_report_split.json"
+  MODEL_PATH="$DATASET_DIR/model_split.json"
 fi
 
 if [[ -n "$VALID_MANIFEST" ]]; then
@@ -80,6 +82,7 @@ if [[ -n "$VALID_MANIFEST" ]]; then
 fi
 echo "log=$LOG_PATH"
 echo "report=$REPORT_PATH"
+echo "model=$MODEL_PATH"
 
 (
   cd "$ROOT_DIR"
@@ -88,12 +91,14 @@ echo "report=$REPORT_PATH"
       --manifest "$MANIFEST" \
       --valid-manifest "$VALID_MANIFEST" \
       --window "$WINDOW" \
+      --model-out "$MODEL_PATH" \
       --out "$REPORT_PATH"
   else
     cargo run --release --manifest-path experiments/ml-trainer/Cargo.toml -- \
       --manifest "$MANIFEST" \
       --window "$WINDOW" \
       --train-ratio "$TRAIN_RATIO" \
+      --model-out "$MODEL_PATH" \
       --out "$REPORT_PATH"
   fi
 ) | tee "$LOG_PATH"

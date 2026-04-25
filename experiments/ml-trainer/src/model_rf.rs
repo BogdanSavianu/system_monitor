@@ -1,3 +1,8 @@
+use std::fs;
+use std::path::Path;
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use smartcore::ensemble::random_forest_classifier::{
     RandomForestClassifier, RandomForestClassifierParameters,
 };
@@ -23,7 +28,7 @@ impl Default for RandomForestConfig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RandomForestModel {
     model: RandomForestClassifier<f64, u32, DenseMatrix<f64>, Vec<u32>>,
 }
@@ -54,5 +59,19 @@ impl RandomForestModel {
         let x = DenseMatrix::from_2d_vec(&x)?;
         let pred = self.model.predict(&x)?;
         Ok(pred.into_iter().map(|v| v as u8).collect())
+    }
+
+    pub fn save_to_path<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let json = serde_json::to_string(self).context("serialize random forest model")?;
+        fs::write(path.as_ref(), json)
+            .with_context(|| format!("write model file '{}'", path.as_ref().display()))?;
+        Ok(())
+    }
+
+    pub fn load_from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let data = fs::read_to_string(path.as_ref())
+            .with_context(|| format!("read model file '{}'", path.as_ref().display()))?;
+        let model = serde_json::from_str(&data).context("deserialize random forest model")?;
+        Ok(model)
     }
 }

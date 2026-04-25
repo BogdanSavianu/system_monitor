@@ -22,6 +22,8 @@ struct Args {
     manifest: Option<String>,
     valid_dataset_dir: Option<String>,
     valid_manifest: Option<String>,
+    model_in: Option<String>,
+    model_out: Option<String>,
     window: usize,
     train_ratio: f64,
     out: Option<String>,
@@ -30,6 +32,8 @@ struct Args {
 #[derive(Debug, Serialize)]
 struct TrainingReport {
     split_mode: String,
+    model_in: Option<String>,
+    model_out: Option<String>,
     train_runs: usize,
     valid_runs: usize,
     train_rows: usize,
@@ -47,6 +51,8 @@ fn parse_args() -> Result<Args> {
     let mut manifest: Option<String> = None;
     let mut valid_dataset_dir: Option<String> = None;
     let mut valid_manifest: Option<String> = None;
+    let mut model_in: Option<String> = None;
+    let mut model_out: Option<String> = None;
     let mut window: usize = 24;
     let mut train_ratio: f64 = 0.8;
     let mut out: Option<String> = None;
@@ -102,6 +108,30 @@ fn parse_args() -> Result<Args> {
         }
         if let Some(value) = arg.strip_prefix("--valid-manifest=") {
             valid_manifest = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+
+        if arg == "--model-in" {
+            let value = args.get(i + 1).context("--model-in expects a value")?;
+            model_in = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--model-in=") {
+            model_in = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+
+        if arg == "--model-out" {
+            let value = args.get(i + 1).context("--model-out expects a value")?;
+            model_out = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--model-out=") {
+            model_out = Some(value.to_string());
             i += 1;
             continue;
         }
@@ -162,6 +192,12 @@ fn parse_args() -> Result<Args> {
     if valid_dataset_dir.is_some() && valid_manifest.is_some() {
         bail!("provide only one of --valid-dataset-dir or --valid-manifest");
     }
+    if model_in.is_some() && model_out.is_some() {
+        bail!("provide only one of --model-in or --model-out");
+    }
+    if model_in.is_some() && (valid_dataset_dir.is_some() || valid_manifest.is_some()) {
+        bail!("--model-in mode uses only one evaluation dataset; do not provide validation dataset arguments");
+    }
     if dataset_dir.is_none() && manifest.is_none() {
         dataset_dir = Some("./experiments/dataset_large".to_string());
     }
@@ -171,6 +207,8 @@ fn parse_args() -> Result<Args> {
         manifest,
         valid_dataset_dir,
         valid_manifest,
+        model_in,
+        model_out,
         window,
         train_ratio,
         out,
@@ -192,6 +230,63 @@ fn csv_paths_from_args(
 
 fn run() -> Result<()> {
     let args = parse_args()?;
+
+    if let Some(model_path) = &args.model_in {
+        let eval_csv_paths = csv_paths_from_args(&args.dataset_dir, &args.manifest, "./experiments/dataset_large")?;
+        let eval_runs = load_runs_from_csv_paths(&eval_csv_paths)?;
+        if eval_runs.is_empty() {
+            bail!("evaluation dataset has no runs");
+        }
+
+        let eval_rows = eval_runs
+            .iter()
+            .flat_map(|r| build_feature_rows(&r.samples, args.window))
+            .collect::<Vec<_>>();
+        if eval_rows.is_empty() {
+            bail!("not enough rows after feature-window transform; lower --window or add more data");
+        }
+
+        let model = RandomForestModel::load_from_path(model_path)
+            .with_context(|| format!("failed to load model from '{}'", model_path))?;
+        let y_true = eval_rows.iter().map(|r| r.label).collect::<Vec<_>>();
+        let y_pred = model.predict_labels(&eval_rows).context("prediction failed")?;
+        let metrics = binary_metrics(&y_true, &y_pred);
+
+        let split_mode = "saved_model_evaluation".to_string();
+        println!("ml-trainer complete");
+        println!("split_mode={}", split_mode);
+        println!("loaded_model={}", model_path);
+        println!("train_runs=0 valid_runs={}", eval_runs.len());
+        println!("train_rows=0 valid_rows={} window={}", eval_rows.len(), args.window);
+        println!(
+            "accuracy={:.4} precision={:.4} recall={:.4} f1={:.4}",
+            metrics.accuracy, metrics.precision, metrics.recall, metrics.f1
+        );
+
+        if let Some(path) = args.out {
+            let report = TrainingReport {
+                split_mode,
+                model_in: Some(model_path.clone()),
+                model_out: None,
+                train_runs: 0,
+                valid_runs: eval_runs.len(),
+                train_rows: 0,
+                valid_rows: eval_rows.len(),
+                window: args.window,
+                train_ratio: args.train_ratio,
+                accuracy: metrics.accuracy,
+                precision: metrics.precision,
+                recall: metrics.recall,
+                f1: metrics.f1,
+            };
+
+            let json = serde_json::to_string_pretty(&report)?;
+            fs::write(&path, json).with_context(|| format!("failed to write report '{}'", path))?;
+            println!("report={}", path);
+        }
+
+        return Ok(());
+    }
 
     let train_csv_paths = csv_paths_from_args(&args.dataset_dir, &args.manifest, "./experiments/dataset_large")?;
     let train_source_runs = load_runs_from_csv_paths(&train_csv_paths)?;
@@ -250,6 +345,12 @@ fn run() -> Result<()> {
     let rf_config = RandomForestConfig::default();
     let model = RandomForestModel::train(&train_rows, &rf_config)
         .context("random forest training failed")?;
+    if let Some(model_path) = &args.model_out {
+        model
+            .save_to_path(model_path)
+            .with_context(|| format!("failed to save model to '{}'", model_path))?;
+        println!("saved_model={}", model_path);
+    }
 
     let y_true = valid_rows.iter().map(|r| r.label).collect::<Vec<_>>();
     let y_pred = model.predict_labels(&valid_rows).context("prediction failed")?;
@@ -276,6 +377,8 @@ fn run() -> Result<()> {
     if let Some(path) = args.out {
         let report = TrainingReport {
             split_mode,
+            model_in: None,
+            model_out: args.model_out,
             train_runs: train_runs.len(),
             valid_runs: valid_runs.len(),
             train_rows: train_rows.len(),
