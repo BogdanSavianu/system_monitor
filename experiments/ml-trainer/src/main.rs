@@ -13,7 +13,7 @@ use crate::dataset::{
     csv_paths_from_dir, csv_paths_from_manifest, load_runs_from_csv_paths, split_runs_by_ratio,
 };
 use crate::eval::binary_metrics;
-use crate::features::build_feature_rows;
+use crate::features::{FeatureSet, build_feature_rows};
 use crate::model_rf::{RandomForestConfig, RandomForestModel};
 
 #[derive(Debug, Clone)]
@@ -24,6 +24,7 @@ struct Args {
     valid_manifest: Option<String>,
     model_in: Option<String>,
     model_out: Option<String>,
+    feature_set: FeatureSet,
     window: usize,
     train_ratio: f64,
     out: Option<String>,
@@ -32,6 +33,7 @@ struct Args {
 #[derive(Debug, Serialize)]
 struct TrainingReport {
     split_mode: String,
+    feature_set: String,
     model_in: Option<String>,
     model_out: Option<String>,
     train_runs: usize,
@@ -53,6 +55,7 @@ fn parse_args() -> Result<Args> {
     let mut valid_manifest: Option<String> = None;
     let mut model_in: Option<String> = None;
     let mut model_out: Option<String> = None;
+    let mut feature_set = FeatureSet::Full;
     let mut window: usize = 24;
     let mut train_ratio: f64 = 0.8;
     let mut out: Option<String> = None;
@@ -138,6 +141,20 @@ fn parse_args() -> Result<Args> {
             continue;
         }
 
+        if arg == "--feature-set" {
+            let value = args.get(i + 1).context("--feature-set expects a value")?;
+            feature_set = FeatureSet::parse(value)
+                .with_context(|| format!("invalid --feature-set value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--feature-set=") {
+            feature_set = FeatureSet::parse(value)
+                .with_context(|| format!("invalid --feature-set value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
         if arg == "--window" {
             let value = args.get(i + 1).context("--window expects a value")?;
             window = value
@@ -213,6 +230,7 @@ fn parse_args() -> Result<Args> {
         valid_manifest,
         model_in,
         model_out,
+        feature_set,
         window,
         train_ratio,
         out,
@@ -268,6 +286,7 @@ fn run() -> Result<()> {
         println!("ml-trainer complete");
         println!("split_mode={}", split_mode);
         println!("loaded_model={}", model_path);
+        println!("loaded_model_feature_set={}", model.feature_set_name());
         println!("train_runs=0 valid_runs={}", eval_runs.len());
         println!(
             "train_rows=0 valid_rows={} window={}",
@@ -282,6 +301,7 @@ fn run() -> Result<()> {
         if let Some(path) = args.out {
             let report = TrainingReport {
                 split_mode,
+                feature_set: model.feature_set_name().to_string(),
                 model_in: Some(model_path.clone()),
                 model_out: None,
                 train_runs: 0,
@@ -366,7 +386,7 @@ fn run() -> Result<()> {
     }
 
     let rf_config = RandomForestConfig::default();
-    let model = RandomForestModel::train(&train_rows, &rf_config)
+    let model = RandomForestModel::train(&train_rows, &rf_config, args.feature_set)
         .context("random forest training failed")?;
     if let Some(model_path) = &args.model_out {
         model
@@ -383,6 +403,7 @@ fn run() -> Result<()> {
 
     println!("ml-trainer complete");
     println!("split_mode={}", split_mode);
+    println!("feature_set={}", args.feature_set.as_str());
     println!(
         "train_runs={} valid_runs={}",
         train_runs.len(),
@@ -402,6 +423,7 @@ fn run() -> Result<()> {
     if let Some(path) = args.out {
         let report = TrainingReport {
             split_mode,
+            feature_set: args.feature_set.as_str().to_string(),
             model_in: None,
             model_out: args.model_out,
             train_runs: train_runs.len(),

@@ -9,7 +9,7 @@ use smartcore::ensemble::random_forest_classifier::{
 use smartcore::error::Failed;
 use smartcore::linalg::basic::matrix::DenseMatrix;
 
-use crate::features::FeatureRow;
+use crate::features::{FeatureRow, FeatureSet};
 
 #[derive(Debug, Clone)]
 pub struct RandomForestConfig {
@@ -30,12 +30,20 @@ impl Default for RandomForestConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RandomForestModel {
+    feature_set: String,
     model: RandomForestClassifier<f64, u32, DenseMatrix<f64>, Vec<u32>>,
 }
 
 impl RandomForestModel {
-    pub fn train(rows: &[FeatureRow], config: &RandomForestConfig) -> Result<Self, Failed> {
-        let x = rows.iter().map(|r| r.as_vec()).collect::<Vec<_>>();
+    pub fn train(
+        rows: &[FeatureRow],
+        config: &RandomForestConfig,
+        feature_set: FeatureSet,
+    ) -> Result<Self, Failed> {
+        let x = rows
+            .iter()
+            .map(|r| r.as_vec(feature_set))
+            .collect::<Vec<_>>();
         let y = rows.iter().map(|r| r.label as u32).collect::<Vec<_>>();
 
         let x = DenseMatrix::from_2d_vec(&x)?;
@@ -51,11 +59,23 @@ impl RandomForestModel {
         };
 
         let model = RandomForestClassifier::fit(&x, &y, params)?;
-        Ok(Self { model })
+        Ok(Self {
+            feature_set: feature_set.as_str().to_string(),
+            model,
+        })
+    }
+
+    pub fn feature_set_name(&self) -> &str {
+        &self.feature_set
     }
 
     pub fn predict_labels(&self, rows: &[FeatureRow]) -> Result<Vec<u8>, Failed> {
-        let x = rows.iter().map(|r| r.as_vec()).collect::<Vec<_>>();
+        let parsed_feature_set = FeatureSet::parse(&self.feature_set).unwrap_or(FeatureSet::Full);
+
+        let x = rows
+            .iter()
+            .map(|r| r.as_vec(parsed_feature_set))
+            .collect::<Vec<_>>();
         let x = DenseMatrix::from_2d_vec(&x)?;
         let pred = self.model.predict(&x)?;
         Ok(pred.into_iter().map(|v| v as u8).collect())

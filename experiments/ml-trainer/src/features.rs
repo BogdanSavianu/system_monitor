@@ -1,3 +1,26 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeatureSet {
+    Full,
+    Realistic,
+}
+
+impl FeatureSet {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "full" => Some(Self::Full),
+            "realistic" => Some(Self::Realistic),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Realistic => "realistic",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TelemetrySample {
     pub elapsed_s: f64,
@@ -18,14 +41,22 @@ pub struct FeatureRow {
 }
 
 impl FeatureRow {
-    pub fn as_vec(&self) -> Vec<f64> {
-        vec![
-            self.memory_slope,
-            self.memory_delta_mean,
-            self.memory_delta_max,
-            self.workload_mean,
-            self.leak_ratio,
-        ]
+    pub fn as_vec(&self, feature_set: FeatureSet) -> Vec<f64> {
+        match feature_set {
+            FeatureSet::Full => vec![
+                self.memory_slope,
+                self.memory_delta_mean,
+                self.memory_delta_max,
+                self.workload_mean,
+                self.leak_ratio,
+            ],
+            FeatureSet::Realistic => vec![
+                self.memory_slope,
+                self.memory_delta_mean,
+                self.memory_delta_max,
+                self.workload_mean,
+            ],
+        }
     }
 }
 

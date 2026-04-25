@@ -8,9 +8,14 @@ RUNS_PER_SCENARIO="${2:-20}"
 STEPS="${3:-240}"
 DEFAULT_JOBS="$(command -v nproc >/dev/null 2>&1 && nproc || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 JOBS="${4:-$DEFAULT_JOBS}"
+SCENARIO_JOBS="${5:-1}"
 
 if [[ "$JOBS" -lt 1 ]]; then
   echo "jobs must be >= 1" >&2
+  exit 1
+fi
+if [[ "$SCENARIO_JOBS" -lt 1 ]]; then
+  echo "scenario_jobs must be >= 1" >&2
   exit 1
 fi
 
@@ -25,7 +30,7 @@ rand_range() {
 echo "[1/3] building generators"
 make -C "$LEAKS_DIR"
 
-echo "[2/3] generating dataset in $OUT_DIR with jobs=$JOBS"
+echo "[2/3] generating dataset in $OUT_DIR with jobs=$JOBS scenario_jobs=$SCENARIO_JOBS"
 for i in $(seq 1 "$RUNS_PER_SCENARIO"); do
   (
     run_seed="$(date +%s)-$i-$$-$RANDOM-$RANDOM"
@@ -56,16 +61,40 @@ for i in $(seq 1 "$RUNS_PER_SCENARIO"); do
     spiky_every="$(rand_range 4 8)"
     spiky_ms="$(rand_range 200 420)"
 
+    run_scenario() {
+      "$@" &
+      scenario_pids+=("$!")
+
+      if (( ${#scenario_pids[@]} >= SCENARIO_JOBS )); then
+        for pid in "${scenario_pids[@]}"; do
+          wait "$pid" || scenario_failed=1
+        done
+        scenario_pids=()
+      fi
+    }
+
+    scenario_failed=0
+    scenario_pids=()
+
     # positive class runs - label=1
-    LEAK_RUN_SEED="${run_seed}:steady" "$LEAKS_DIR/steady_leak" "$steady_kb" 1 "$STEPS" "$OUT_DIR/steady_r${i}.csv"
-    LEAK_RUN_SEED="${run_seed}:bursty" "$LEAKS_DIR/bursty_leak" "$bursty_base_kb" 1 "$bursty_every" "$bursty_spike_kb" "$STEPS" "$OUT_DIR/bursty_r${i}.csv"
-    LEAK_RUN_SEED="${run_seed}:staircase" "$LEAKS_DIR/staircase_leak" "$staircase_start_kb" "$staircase_increment_kb" 1 "$STEPS" "$OUT_DIR/staircase_r${i}.csv"
-    LEAK_RUN_SEED="${run_seed}:subtle" "$LEAKS_DIR/subtle_leak" "$subtle_allocs" "$subtle_kb_per_alloc" "$subtle_leak_pct" 1 "$STEPS" "$OUT_DIR/subtle_r${i}.csv"
-    LEAK_RUN_SEED="${run_seed}:noisy" "$LEAKS_DIR/noisy_leak" "$noisy_base_kb" "$noisy_jitter_pct" "$noisy_cpu_spike_pct" "$noisy_max_cpu_spike_ms" 1 "$STEPS" "$OUT_DIR/noisy_r${i}.csv"
+    run_scenario env LEAK_RUN_SEED="${run_seed}:steady" "$LEAKS_DIR/steady_leak" "$steady_kb" 1 "$STEPS" "$OUT_DIR/steady_r${i}.csv"
+    run_scenario env LEAK_RUN_SEED="${run_seed}:bursty" "$LEAKS_DIR/bursty_leak" "$bursty_base_kb" 1 "$bursty_every" "$bursty_spike_kb" "$STEPS" "$OUT_DIR/bursty_r${i}.csv"
+    run_scenario env LEAK_RUN_SEED="${run_seed}:staircase" "$LEAKS_DIR/staircase_leak" "$staircase_start_kb" "$staircase_increment_kb" 1 "$STEPS" "$OUT_DIR/staircase_r${i}.csv"
+    run_scenario env LEAK_RUN_SEED="${run_seed}:subtle" "$LEAKS_DIR/subtle_leak" "$subtle_allocs" "$subtle_kb_per_alloc" "$subtle_leak_pct" 1 "$STEPS" "$OUT_DIR/subtle_r${i}.csv"
+    run_scenario env LEAK_RUN_SEED="${run_seed}:noisy" "$LEAKS_DIR/noisy_leak" "$noisy_base_kb" "$noisy_jitter_pct" "$noisy_cpu_spike_pct" "$noisy_max_cpu_spike_ms" 1 "$STEPS" "$OUT_DIR/noisy_r${i}.csv"
 
     # negative class runs - label=0
-    LEAK_RUN_SEED="${run_seed}:control" "$LEAKS_DIR/control_workload" "$control_allocs" "$control_kb_per_alloc" "$control_burst_every" 1 "$STEPS" "$OUT_DIR/control_r${i}.csv"
-    LEAK_RUN_SEED="${run_seed}:spiky_stable" "$LEAKS_DIR/cpu_spiky_stable_mem" "$spiky_base_kb" "$spiky_every" "$spiky_ms" 1 "$STEPS" "$OUT_DIR/spiky_stable_r${i}.csv"
+    run_scenario env LEAK_RUN_SEED="${run_seed}:control" "$LEAKS_DIR/control_workload" "$control_allocs" "$control_kb_per_alloc" "$control_burst_every" 1 "$STEPS" "$OUT_DIR/control_r${i}.csv"
+    run_scenario env LEAK_RUN_SEED="${run_seed}:spiky_stable" "$LEAKS_DIR/cpu_spiky_stable_mem" "$spiky_base_kb" "$spiky_every" "$spiky_ms" 1 "$STEPS" "$OUT_DIR/spiky_stable_r${i}.csv"
+
+    for pid in "${scenario_pids[@]}"; do
+      wait "$pid" || scenario_failed=1
+    done
+
+    if (( scenario_failed != 0 )); then
+      echo "run batch $i failed" >&2
+      exit 1
+    fi
 
     echo "  generated run batch $i/$RUNS_PER_SCENARIO (steady_kb=$steady_kb bursty_base=$bursty_base_kb bursty_spike=$bursty_spike_kb staircase_inc=$staircase_increment_kb subtle_leak_pct=$subtle_leak_pct noisy_base=$noisy_base_kb control_allocs=$control_allocs spiky_base=$spiky_base_kb)"
   ) &

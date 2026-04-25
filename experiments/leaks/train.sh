@@ -6,6 +6,7 @@ DATASET_DIR="${1:-$ROOT_DIR/experiments/dataset_large}"
 WINDOW="${2:-24}"
 TRAIN_RATIO="${3:-0.8}"
 VALID_DATASET_DIR="${4:-}"
+FEATURE_SET="${5:-full}"
 
 if [[ ! -d "$DATASET_DIR" ]]; then
   echo "dataset dir not found: $DATASET_DIR" >&2
@@ -66,9 +67,9 @@ else
 fi
 
 if [[ -n "$VALID_MANIFEST" ]]; then
-  echo "training with window=$WINDOW mode=external_validation_dataset"
+  echo "training with window=$WINDOW mode=external_validation_dataset feature_set=$FEATURE_SET"
 else
-  echo "training with window=$WINDOW train_ratio=$TRAIN_RATIO mode=in_dataset_run_split"
+  echo "training with window=$WINDOW train_ratio=$TRAIN_RATIO mode=in_dataset_run_split feature_set=$FEATURE_SET"
 fi
 echo "dataset=$DATASET_DIR"
 echo "input_csv_files=$CSV_COUNT input_rows=$TOTAL_ROWS"
@@ -86,12 +87,14 @@ echo "model=$MODEL_PATH"
     cargo run --release --manifest-path experiments/ml-trainer/Cargo.toml -- \
       --manifest "$MANIFEST" \
       --valid-manifest "$VALID_MANIFEST" \
+      --feature-set "$FEATURE_SET" \
       --window "$WINDOW" \
       --model-out "$MODEL_PATH" \
       --out "$REPORT_PATH"
   else
     cargo run --release --manifest-path experiments/ml-trainer/Cargo.toml -- \
       --manifest "$MANIFEST" \
+      --feature-set "$FEATURE_SET" \
       --window "$WINDOW" \
       --train-ratio "$TRAIN_RATIO" \
       --model-out "$MODEL_PATH" \
