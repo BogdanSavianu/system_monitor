@@ -101,7 +101,9 @@ fn parse_args() -> Result<Args> {
         }
 
         if arg == "--valid-manifest" {
-            let value = args.get(i + 1).context("--valid-manifest expects a value")?;
+            let value = args
+                .get(i + 1)
+                .context("--valid-manifest expects a value")?;
             valid_manifest = Some(value.clone());
             i += 2;
             continue;
@@ -196,7 +198,9 @@ fn parse_args() -> Result<Args> {
         bail!("provide only one of --model-in or --model-out");
     }
     if model_in.is_some() && (valid_dataset_dir.is_some() || valid_manifest.is_some()) {
-        bail!("--model-in mode uses only one evaluation dataset; do not provide validation dataset arguments");
+        bail!(
+            "--model-in mode uses only one evaluation dataset; do not provide validation dataset arguments"
+        );
     }
     if dataset_dir.is_none() && manifest.is_none() {
         dataset_dir = Some("./experiments/dataset_large".to_string());
@@ -232,7 +236,11 @@ fn run() -> Result<()> {
     let args = parse_args()?;
 
     if let Some(model_path) = &args.model_in {
-        let eval_csv_paths = csv_paths_from_args(&args.dataset_dir, &args.manifest, "./experiments/dataset_large")?;
+        let eval_csv_paths = csv_paths_from_args(
+            &args.dataset_dir,
+            &args.manifest,
+            "./experiments/dataset_large",
+        )?;
         let eval_runs = load_runs_from_csv_paths(&eval_csv_paths)?;
         if eval_runs.is_empty() {
             bail!("evaluation dataset has no runs");
@@ -243,13 +251,17 @@ fn run() -> Result<()> {
             .flat_map(|r| build_feature_rows(&r.samples, args.window))
             .collect::<Vec<_>>();
         if eval_rows.is_empty() {
-            bail!("not enough rows after feature-window transform; lower --window or add more data");
+            bail!(
+                "not enough rows after feature-window transform; lower --window or add more data"
+            );
         }
 
         let model = RandomForestModel::load_from_path(model_path)
             .with_context(|| format!("failed to load model from '{}'", model_path))?;
         let y_true = eval_rows.iter().map(|r| r.label).collect::<Vec<_>>();
-        let y_pred = model.predict_labels(&eval_rows).context("prediction failed")?;
+        let y_pred = model
+            .predict_labels(&eval_rows)
+            .context("prediction failed")?;
         let metrics = binary_metrics(&y_true, &y_pred);
 
         let split_mode = "saved_model_evaluation".to_string();
@@ -257,7 +269,11 @@ fn run() -> Result<()> {
         println!("split_mode={}", split_mode);
         println!("loaded_model={}", model_path);
         println!("train_runs=0 valid_runs={}", eval_runs.len());
-        println!("train_rows=0 valid_rows={} window={}", eval_rows.len(), args.window);
+        println!(
+            "train_rows=0 valid_rows={} window={}",
+            eval_rows.len(),
+            args.window
+        );
         println!(
             "accuracy={:.4} precision={:.4} recall={:.4} f1={:.4}",
             metrics.accuracy, metrics.precision, metrics.recall, metrics.f1
@@ -288,34 +304,39 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    let train_csv_paths = csv_paths_from_args(&args.dataset_dir, &args.manifest, "./experiments/dataset_large")?;
+    let train_csv_paths = csv_paths_from_args(
+        &args.dataset_dir,
+        &args.manifest,
+        "./experiments/dataset_large",
+    )?;
     let train_source_runs = load_runs_from_csv_paths(&train_csv_paths)?;
 
-    let (split_mode, train_runs, valid_runs) = if args.valid_manifest.is_some() || args.valid_dataset_dir.is_some() {
-        let valid_csv_paths = csv_paths_from_args(
-            &args.valid_dataset_dir,
-            &args.valid_manifest,
-            "./experiments/dataset_large",
-        )?;
-        let valid_source_runs = load_runs_from_csv_paths(&valid_csv_paths)?;
-        if train_source_runs.is_empty() {
-            bail!("training dataset has no runs");
-        }
-        if valid_source_runs.is_empty() {
-            bail!("validation dataset has no runs");
-        }
-        (
-            "external_validation_dataset".to_string(),
-            train_source_runs,
-            valid_source_runs,
-        )
-    } else {
-        if train_source_runs.len() < 2 {
-            bail!("need at least 2 runs for train/validation split");
-        }
-        let (train, valid) = split_runs_by_ratio(train_source_runs, args.train_ratio);
-        ("in_dataset_run_split".to_string(), train, valid)
-    };
+    let (split_mode, train_runs, valid_runs) =
+        if args.valid_manifest.is_some() || args.valid_dataset_dir.is_some() {
+            let valid_csv_paths = csv_paths_from_args(
+                &args.valid_dataset_dir,
+                &args.valid_manifest,
+                "./experiments/dataset_large",
+            )?;
+            let valid_source_runs = load_runs_from_csv_paths(&valid_csv_paths)?;
+            if train_source_runs.is_empty() {
+                bail!("training dataset has no runs");
+            }
+            if valid_source_runs.is_empty() {
+                bail!("validation dataset has no runs");
+            }
+            (
+                "external_validation_dataset".to_string(),
+                train_source_runs,
+                valid_source_runs,
+            )
+        } else {
+            if train_source_runs.len() < 2 {
+                bail!("need at least 2 runs for train/validation split");
+            }
+            let (train, valid) = split_runs_by_ratio(train_source_runs, args.train_ratio);
+            ("in_dataset_run_split".to_string(), train, valid)
+        };
 
     let train_rows = train_runs
         .iter()
@@ -339,7 +360,9 @@ fn run() -> Result<()> {
     let valid_has_pos = valid_rows.iter().any(|r| r.label == 1);
     let valid_has_neg = valid_rows.iter().any(|r| r.label == 0);
     if !(valid_has_pos && valid_has_neg) {
-        bail!("validation split has only one class; add more runs per class or adjust --train-ratio");
+        bail!(
+            "validation split has only one class; add more runs per class or adjust --train-ratio"
+        );
     }
 
     let rf_config = RandomForestConfig::default();
@@ -353,7 +376,9 @@ fn run() -> Result<()> {
     }
 
     let y_true = valid_rows.iter().map(|r| r.label).collect::<Vec<_>>();
-    let y_pred = model.predict_labels(&valid_rows).context("prediction failed")?;
+    let y_pred = model
+        .predict_labels(&valid_rows)
+        .context("prediction failed")?;
     let metrics = binary_metrics(&y_true, &y_pred);
 
     println!("ml-trainer complete");

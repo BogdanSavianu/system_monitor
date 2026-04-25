@@ -13,9 +13,7 @@ if [[ ! -d "$DATASET_DIR" ]]; then
 fi
 
 MANIFEST="$DATASET_DIR/manifest.txt"
-if [[ ! -f "$MANIFEST" ]]; then
-  find "$DATASET_DIR" -maxdepth 1 -type f -name '*.csv' | sort > "$MANIFEST"
-fi
+find "$DATASET_DIR" -maxdepth 1 -type f -name '*.csv' | sort > "$MANIFEST"
 
 VALID_MANIFEST=""
 if [[ -n "$VALID_DATASET_DIR" ]]; then
@@ -25,9 +23,7 @@ if [[ -n "$VALID_DATASET_DIR" ]]; then
   fi
 
   VALID_MANIFEST="$VALID_DATASET_DIR/manifest.txt"
-  if [[ ! -f "$VALID_MANIFEST" ]]; then
-    find "$VALID_DATASET_DIR" -maxdepth 1 -type f -name '*.csv' | sort > "$VALID_MANIFEST"
-  fi
+  find "$VALID_DATASET_DIR" -maxdepth 1 -type f -name '*.csv' | sort > "$VALID_MANIFEST"
 fi
 
 CSV_COUNT="$(wc -l < "$MANIFEST" | tr -d ' ')"

@@ -20,9 +20,7 @@ if [[ ! -d "$DATASET_DIR" ]]; then
 fi
 
 MANIFEST="$DATASET_DIR/manifest.txt"
-if [[ ! -f "$MANIFEST" ]]; then
-  find "$DATASET_DIR" -maxdepth 1 -type f -name '*.csv' | sort > "$MANIFEST"
-fi
+find "$DATASET_DIR" -maxdepth 1 -type f -name '*.csv' | sort > "$MANIFEST"
 
 CSV_COUNT="$(wc -l < "$MANIFEST" | tr -d ' ')"
 if [[ "$CSV_COUNT" -eq 0 ]]; then
