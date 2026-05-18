@@ -24,6 +24,8 @@ struct CsvRow {
     leaked_kb_step: f64,
     leaked_kb_total: f64,
     workload_kb_this_step: f64,
+    #[serde(default)]
+    observed_memory_kb: Option<f64>,
 }
 
 pub fn csv_paths_from_manifest<P: AsRef<Path>>(manifest: P) -> Result<Vec<String>> {
@@ -103,21 +105,25 @@ pub fn load_runs_from_csv<P: AsRef<Path>>(path: P) -> Result<Vec<LabeledRun>> {
 
         let samples = rows
             .into_iter()
-            .map(|r| TelemetrySample {
-                elapsed_s: r.elapsed_s,
-                leaked_kb_step: r.leaked_kb_step,
-                leaked_kb_total: r.leaked_kb_total,
-                workload_kb_this_step: r.workload_kb_this_step,
-                observed_memory_kb: synth_observed_memory_kb(
-                    &scenario_name,
-                    &run_id,
-                    r.step,
-                    r.label,
-                    r.leaked_kb_step,
-                    r.leaked_kb_total,
-                    r.workload_kb_this_step,
-                ),
-                label: r.label,
+            .map(|r| {
+                let observed_memory_kb = r.observed_memory_kb.unwrap_or_else(|| {
+                    synth_observed_memory_kb(
+                        &scenario_name,
+                        &run_id,
+                        r.step,
+                        r.label,
+                        r.leaked_kb_step,
+                        r.leaked_kb_total,
+                        r.workload_kb_this_step,
+                    )
+                });
+
+                TelemetrySample {
+                    elapsed_s: r.elapsed_s,
+                    workload_kb_this_step: r.workload_kb_this_step,
+                    observed_memory_kb,
+                    label: r.label,
+                }
             })
             .collect::<Vec<_>>();
 

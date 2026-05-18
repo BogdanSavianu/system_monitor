@@ -6,6 +6,7 @@ use crate::{
         ProcessCpuSampleDTO, ProcessHierarchyIndexDTO, ProcessHierarchyNodeDTO,
         ProcessNetworkSampleDTO, ThreadCpuSampleDTO,
     },
+    ml::MemoryLeakDetector,
     model::{ProcessHierarchyModel, ProcessNetworkStatsModel},
     parser::{
         NetworkParser, Parser, ProcessParser, ThreadParser, network_parser::TraitNetworkParser,
@@ -22,6 +23,15 @@ pub struct MonitorObservation {
     pub network: Vec<ProcessNetworkSampleDTO>,
     pub total_cpu_top: f64,
     pub system_mem_used_kb: u64,
+    pub anomaly_by_pid: HashMap<Pid, bool>,
+    pub anomaly_transitions: Vec<MonitorAnomalyTransition>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MonitorAnomalyTransition {
+    pub pid: Pid,
+    pub process_name: String,
+    pub is_anomalous: bool,
 }
 
 pub struct Monitor<
@@ -34,6 +44,7 @@ pub struct Monitor<
     previous_total_cpu: Option<u64>,
     accumulator: Option<Box<dyn TraitSampleAccumulator + Send>>,
     storage_sink: Option<Box<dyn StorageSink + Send>>,
+    leak_detector: Option<MemoryLeakDetector>,
 }
 
 impl Monitor<ProcessParser, ThreadParser, NetworkParser> {
@@ -48,6 +59,7 @@ impl Monitor<ProcessParser, ThreadParser, NetworkParser> {
             previous_total_cpu: None,
             accumulator: None,
             storage_sink: None,
+            leak_detector: None,
         }
     }
 }
@@ -73,13 +85,36 @@ impl<
         accumulator: Option<Box<dyn TraitSampleAccumulator + Send>>,
         storage_sink: Option<Box<dyn StorageSink + Send>>,
     ) -> Self {
+        Self::with_parsers_pipeline_and_detector(
+            process_parser,
+            thread_parser,
+            network_parser,
+            accumulator,
+            storage_sink,
+            None,
+        )
+    }
+
+    pub fn with_parsers_pipeline_and_detector(
+        process_parser: ProcParser,
+        thread_parser: ThrParser,
+        network_parser: NetParser,
+        accumulator: Option<Box<dyn TraitSampleAccumulator + Send>>,
+        storage_sink: Option<Box<dyn StorageSink + Send>>,
+        leak_detector: Option<MemoryLeakDetector>,
+    ) -> Self {
         Monitor {
             parser: Parser::new(process_parser, thread_parser, network_parser),
             system_state: SystemState::new(),
             previous_total_cpu: None,
             accumulator,
             storage_sink,
+            leak_detector,
         }
+    }
+
+    pub fn set_memory_leak_detector(&mut self, leak_detector: Option<MemoryLeakDetector>) {
+        self.leak_detector = leak_detector;
     }
 
     fn persist_observation(
@@ -240,12 +275,50 @@ impl<
 
         self.persist_observation(collected_at, &cpu, &network);
 
+        let (anomaly_by_pid, anomaly_transitions) =
+            if let Some(detector) = self.leak_detector.as_mut() {
+                let result = detector.evaluate(collected_at, &cpu);
+                let transitions = result
+                    .transitions
+                    .into_iter()
+                    .map(|transition| MonitorAnomalyTransition {
+                        pid: transition.pid,
+                        process_name: transition.process_name,
+                        is_anomalous: transition.is_anomalous,
+                    })
+                    .collect::<Vec<_>>();
+
+                (result.anomaly_by_pid, transitions)
+            } else {
+                (HashMap::new(), Vec::new())
+            };
+
+        for transition in &anomaly_transitions {
+            if transition.is_anomalous {
+                info!(
+                    target: "monitor::anomaly",
+                    pid = transition.pid,
+                    process = transition.process_name.as_str(),
+                    "memory leak anomaly detected"
+                );
+            } else {
+                info!(
+                    target: "monitor::anomaly",
+                    pid = transition.pid,
+                    process = transition.process_name.as_str(),
+                    "memory leak anomaly cleared"
+                );
+            }
+        }
+
         Ok(MonitorObservation {
             collected_at,
             cpu,
             network,
             total_cpu_top,
             system_mem_used_kb,
+            anomaly_by_pid,
+            anomaly_transitions,
         })
     }
 

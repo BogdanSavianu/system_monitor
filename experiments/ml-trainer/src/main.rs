@@ -1,7 +1,7 @@
 mod dataset;
 mod eval;
 mod features;
-mod model_rf;
+mod model_xgb;
 
 use std::env;
 use std::fs;
@@ -10,12 +10,32 @@ use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
 use crate::dataset::{
-    csv_paths_from_dir, csv_paths_from_manifest, load_runs_from_csv_paths,
-    split_runs_by_ratio, split_runs_validation_scenarios,
+    csv_paths_from_dir, csv_paths_from_manifest, load_runs_from_csv_paths, split_runs_by_ratio,
+    split_runs_validation_scenarios,
 };
-use crate::eval::binary_metrics;
-use crate::features::{FeatureSet, build_feature_rows};
-use crate::model_rf::{RandomForestConfig, RandomForestModel};
+use crate::eval::{BinaryMetrics, binary_metrics};
+use crate::features::build_feature_rows;
+use crate::model_xgb::{XGBoostConfig, XGBoostModel};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Algorithm {
+    XGBoost,
+}
+
+impl Algorithm {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "xgboost" | "xgb" => Some(Self::XGBoost),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::XGBoost => "xgboost",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SplitPolicy {
@@ -62,9 +82,17 @@ struct Args {
     valid_manifest: Option<String>,
     model_in: Option<String>,
     model_out: Option<String>,
-    feature_set: FeatureSet,
     split_policy: SplitPolicy,
     run_sanity_checks: bool,
+    algorithm: Algorithm,
+    xgb_n_estimators: usize,
+    xgb_max_depth: u16,
+    xgb_learning_rate: f64,
+    xgb_min_child_weight: usize,
+    xgb_lambda: f64,
+    xgb_gamma: f64,
+    xgb_subsample: f64,
+    xgb_threshold: Option<f64>,
     window: usize,
     train_ratio: f64,
     out: Option<String>,
@@ -74,7 +102,6 @@ struct Args {
 struct TrainingReport {
     split_mode: String,
     split_policy: String,
-    feature_set: String,
     model_in: Option<String>,
     model_out: Option<String>,
     sanity: Option<SanityReport>,
@@ -97,9 +124,18 @@ fn parse_args() -> Result<Args> {
     let mut valid_manifest: Option<String> = None;
     let mut model_in: Option<String> = None;
     let mut model_out: Option<String> = None;
-    let mut feature_set = FeatureSet::Full;
     let mut split_policy = SplitPolicy::Run;
     let mut run_sanity_checks = false;
+    let mut algorithm = Algorithm::XGBoost;
+    let xgb_defaults = XGBoostConfig::default();
+    let mut xgb_n_estimators: usize = xgb_defaults.n_estimators;
+    let mut xgb_max_depth: u16 = xgb_defaults.max_depth;
+    let mut xgb_learning_rate: f64 = xgb_defaults.learning_rate;
+    let mut xgb_min_child_weight: usize = xgb_defaults.min_child_weight;
+    let mut xgb_lambda: f64 = xgb_defaults.lambda;
+    let mut xgb_gamma: f64 = xgb_defaults.gamma;
+    let mut xgb_subsample: f64 = xgb_defaults.subsample;
+    let mut xgb_threshold: Option<f64> = None;
     let mut window: usize = 24;
     let mut train_ratio: f64 = 0.8;
     let mut out: Option<String> = None;
@@ -185,20 +221,6 @@ fn parse_args() -> Result<Args> {
             continue;
         }
 
-        if arg == "--feature-set" {
-            let value = args.get(i + 1).context("--feature-set expects a value")?;
-            feature_set = FeatureSet::parse(value)
-                .with_context(|| format!("invalid --feature-set value '{}'", value))?;
-            i += 2;
-            continue;
-        }
-        if let Some(value) = arg.strip_prefix("--feature-set=") {
-            feature_set = FeatureSet::parse(value)
-                .with_context(|| format!("invalid --feature-set value '{}'", value))?;
-            i += 1;
-            continue;
-        }
-
         if arg == "--split-policy" {
             let value = args.get(i + 1).context("--split-policy expects a value")?;
             split_policy = SplitPolicy::parse(value)
@@ -215,6 +237,159 @@ fn parse_args() -> Result<Args> {
 
         if arg == "--run-sanity-checks" {
             run_sanity_checks = true;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--algorithm" {
+            let value = args.get(i + 1).context("--algorithm expects a value")?;
+            algorithm = Algorithm::parse(value)
+                .with_context(|| format!("invalid --algorithm value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+
+        if arg == "--xgb-n-estimators" {
+            let value = args
+                .get(i + 1)
+                .context("--xgb-n-estimators expects a value")?;
+            xgb_n_estimators = value
+                .parse::<usize>()
+                .with_context(|| format!("invalid --xgb-n-estimators value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-n-estimators=") {
+            xgb_n_estimators = value
+                .parse::<usize>()
+                .with_context(|| format!("invalid --xgb-n-estimators value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-max-depth" {
+            let value = args.get(i + 1).context("--xgb-max-depth expects a value")?;
+            xgb_max_depth = value
+                .parse::<u16>()
+                .with_context(|| format!("invalid --xgb-max-depth value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-max-depth=") {
+            xgb_max_depth = value
+                .parse::<u16>()
+                .with_context(|| format!("invalid --xgb-max-depth value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-learning-rate" {
+            let value = args
+                .get(i + 1)
+                .context("--xgb-learning-rate expects a value")?;
+            xgb_learning_rate = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-learning-rate value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-learning-rate=") {
+            xgb_learning_rate = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-learning-rate value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-min-child-weight" {
+            let value = args
+                .get(i + 1)
+                .context("--xgb-min-child-weight expects a value")?;
+            xgb_min_child_weight = value
+                .parse::<usize>()
+                .with_context(|| format!("invalid --xgb-min-child-weight value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-min-child-weight=") {
+            xgb_min_child_weight = value
+                .parse::<usize>()
+                .with_context(|| format!("invalid --xgb-min-child-weight value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-lambda" {
+            let value = args.get(i + 1).context("--xgb-lambda expects a value")?;
+            xgb_lambda = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-lambda value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-lambda=") {
+            xgb_lambda = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-lambda value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-gamma" {
+            let value = args.get(i + 1).context("--xgb-gamma expects a value")?;
+            xgb_gamma = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-gamma value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-gamma=") {
+            xgb_gamma = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-gamma value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-subsample" {
+            let value = args.get(i + 1).context("--xgb-subsample expects a value")?;
+            xgb_subsample = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-subsample value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-subsample=") {
+            xgb_subsample = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-subsample value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-threshold" {
+            let value = args.get(i + 1).context("--xgb-threshold expects a value")?;
+            xgb_threshold = Some(
+                value
+                    .parse::<f64>()
+                    .with_context(|| format!("invalid --xgb-threshold value '{}'", value))?,
+            );
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-threshold=") {
+            xgb_threshold = Some(
+                value
+                    .parse::<f64>()
+                    .with_context(|| format!("invalid --xgb-threshold value '{}'", value))?,
+            );
+            i += 1;
+            continue;
+        }
+
+        if let Some(value) = arg.strip_prefix("--algorithm=") {
+            algorithm = Algorithm::parse(value)
+                .with_context(|| format!("invalid --algorithm value '{}'", value))?;
             i += 1;
             continue;
         }
@@ -272,6 +447,18 @@ fn parse_args() -> Result<Args> {
     if !(0.1..=0.95).contains(&train_ratio) {
         bail!("--train-ratio must be in [0.1, 0.95]");
     }
+    if xgb_n_estimators == 0 {
+        bail!("--xgb-n-estimators must be >= 1");
+    }
+    if xgb_max_depth == 0 {
+        bail!("--xgb-max-depth must be >= 1");
+    }
+    if xgb_learning_rate <= 0.0 {
+        bail!("--xgb-learning-rate must be > 0");
+    }
+    if xgb_subsample <= 0.0 || xgb_subsample > 1.0 {
+        bail!("--xgb-subsample must be in (0, 1]");
+    }
     if valid_dataset_dir.is_some() && valid_manifest.is_some() {
         bail!("provide only one of --valid-dataset-dir or --valid-manifest");
     }
@@ -294,9 +481,17 @@ fn parse_args() -> Result<Args> {
         valid_manifest,
         model_in,
         model_out,
-        feature_set,
         split_policy,
         run_sanity_checks,
+        algorithm,
+        xgb_n_estimators,
+        xgb_max_depth,
+        xgb_learning_rate,
+        xgb_min_child_weight,
+        xgb_lambda,
+        xgb_gamma,
+        xgb_subsample,
+        xgb_threshold,
         window,
         train_ratio,
         out,
@@ -320,10 +515,32 @@ fn run() -> Result<()> {
     let args = parse_args()?;
 
     if let Some(model_path) = &args.model_in {
-        let model = RandomForestModel::load_from_path(model_path)
-            .with_context(|| format!("failed to load model from '{}'", model_path))?;
-        let eval_feature_set = FeatureSet::parse(model.feature_set_name()).unwrap_or(FeatureSet::Full);
+        let model_data = fs::read_to_string(model_path)
+            .with_context(|| format!("failed to read model from '{}'", model_path))?;
+        let parsed = serde_json::from_str::<serde_json::Value>(&model_data)
+            .with_context(|| format!("failed to parse model json '{}'", model_path))?;
 
+        let model = match parsed.get("model_type").and_then(|v| v.as_str()) {
+            Some("xgboost") => {
+                let xgb = XGBoostModel::load_from_path(model_path).with_context(|| {
+                    format!("failed to load xgboost model from '{}'", model_path)
+                })?;
+                xgb
+            }
+            Some(other) => {
+                bail!(
+                    "unsupported model_type '{}' in '{}'; only 'xgboost' is supported",
+                    other,
+                    model_path
+                );
+            }
+            None => {
+                bail!(
+                    "missing model_type in '{}'; only xgboost model files are supported",
+                    model_path
+                );
+            }
+        };
         let eval_csv_paths = csv_paths_from_args(
             &args.dataset_dir,
             &args.manifest,
@@ -336,7 +553,7 @@ fn run() -> Result<()> {
 
         let eval_rows = eval_runs
             .iter()
-            .flat_map(|r| build_feature_rows(&r.samples, args.window, eval_feature_set))
+            .flat_map(|r| build_feature_rows(&r.samples, args.window))
             .collect::<Vec<_>>();
         if eval_rows.is_empty() {
             bail!(
@@ -345,16 +562,13 @@ fn run() -> Result<()> {
         }
 
         let y_true = eval_rows.iter().map(|r| r.label).collect::<Vec<_>>();
-        let y_pred = model
-            .predict_labels(&eval_rows)
-            .context("prediction failed")?;
+        let y_pred = model.predict_labels(&eval_rows)?;
         let metrics = binary_metrics(&y_true, &y_pred);
 
         let split_mode = "saved_model_evaluation".to_string();
         println!("ml-trainer complete");
         println!("split_mode={}", split_mode);
         println!("loaded_model={}", model_path);
-        println!("loaded_model_feature_set={}", model.feature_set_name());
         println!("train_runs=0 valid_runs={}", eval_runs.len());
         println!(
             "train_rows=0 valid_rows={} window={}",
@@ -370,7 +584,6 @@ fn run() -> Result<()> {
             let report = TrainingReport {
                 split_mode,
                 split_policy: "n/a".to_string(),
-                feature_set: model.feature_set_name().to_string(),
                 model_in: Some(model_path.clone()),
                 model_out: None,
                 sanity: None,
@@ -435,11 +648,11 @@ fn run() -> Result<()> {
 
     let train_rows = train_runs
         .iter()
-            .flat_map(|r| build_feature_rows(&r.samples, args.window, args.feature_set))
+        .flat_map(|r| build_feature_rows(&r.samples, args.window))
         .collect::<Vec<_>>();
     let valid_rows = valid_runs
         .iter()
-            .flat_map(|r| build_feature_rows(&r.samples, args.window, args.feature_set))
+        .flat_map(|r| build_feature_rows(&r.samples, args.window))
         .collect::<Vec<_>>();
 
     if train_rows.is_empty() || valid_rows.is_empty() {
@@ -460,9 +673,36 @@ fn run() -> Result<()> {
         );
     }
 
-    let rf_config = RandomForestConfig::default();
-    let model = RandomForestModel::train(&train_rows, &rf_config, args.feature_set)
-        .context("random forest training failed")?;
+    let xgb_config = XGBoostConfig {
+        n_estimators: args.xgb_n_estimators,
+        max_depth: args.xgb_max_depth,
+        learning_rate: args.xgb_learning_rate,
+        min_child_weight: args.xgb_min_child_weight,
+        lambda: args.xgb_lambda,
+        gamma: args.xgb_gamma,
+        subsample: args.xgb_subsample,
+        threshold: args.xgb_threshold.unwrap_or(0.5),
+    };
+    let mut model =
+        XGBoostModel::train(&train_rows, &xgb_config).context("xgboost training failed")?;
+
+    if let Some(threshold) = args.xgb_threshold {
+        model.set_threshold(threshold);
+        println!("xgboost_threshold_fixed={:.6}", model.threshold());
+    } else {
+        let y_true = valid_rows.iter().map(|r| r.label).collect::<Vec<_>>();
+        let scores = model
+            .predict_scores(&valid_rows)
+            .context("xgboost score prediction failed")?;
+        let (best_threshold, tuned_metrics) = tune_threshold_from_scores(&y_true, &scores);
+        model.set_threshold(best_threshold);
+        println!("xgboost_threshold_tuned={:.6}", model.threshold());
+        println!(
+            "xgboost_threshold_metrics accuracy={:.4} precision={:.4} recall={:.4} f1={:.4}",
+            tuned_metrics.accuracy, tuned_metrics.precision, tuned_metrics.recall, tuned_metrics.f1
+        );
+    }
+
     if let Some(model_path) = &args.model_out {
         model
             .save_to_path(model_path)
@@ -471,15 +711,13 @@ fn run() -> Result<()> {
     }
 
     let y_true = valid_rows.iter().map(|r| r.label).collect::<Vec<_>>();
-    let y_pred = model
-        .predict_labels(&valid_rows)
-        .context("prediction failed")?;
+    let y_pred = model.predict_labels(&valid_rows)?;
     let metrics = binary_metrics(&y_true, &y_pred);
 
     println!("ml-trainer complete");
     println!("split_mode={}", split_mode);
     println!("split_policy={}", args.split_policy.as_str());
-    println!("feature_set={}", args.feature_set.as_str());
+    println!("algorithm={}", args.algorithm.as_str());
     println!(
         "train_runs={} valid_runs={}",
         train_runs.len(),
@@ -497,13 +735,13 @@ fn run() -> Result<()> {
     );
 
     let sanity = if args.run_sanity_checks {
-        let baseline_pred = threshold_baseline_predictions(&train_rows, &valid_rows, args.feature_set);
+        let baseline_pred = threshold_baseline_predictions(&train_rows, &valid_rows);
         let baseline_true = valid_rows.iter().map(|r| r.label).collect::<Vec<_>>();
         let baseline_metrics = binary_metrics(&baseline_true, &baseline_pred);
 
         let shuffled_rows = shuffled_label_rows(&train_rows);
-        let shuffled_model = RandomForestModel::train(&shuffled_rows, &rf_config, args.feature_set)
-            .context("random forest sanity training failed")?;
+        let shuffled_model = XGBoostModel::train(&shuffled_rows, &xgb_config)
+            .context("xgboost sanity training failed")?;
         let shuffled_pred = shuffled_model
             .predict_labels(&valid_rows)
             .context("sanity prediction failed")?;
@@ -546,7 +784,6 @@ fn run() -> Result<()> {
         let report = TrainingReport {
             split_mode,
             split_policy: args.split_policy.as_str().to_string(),
-            feature_set: args.feature_set.as_str().to_string(),
             model_in: None,
             model_out: args.model_out,
             sanity,
@@ -589,7 +826,6 @@ fn shuffled_label_rows(rows: &[crate::features::FeatureRow]) -> Vec<crate::featu
 fn threshold_baseline_predictions(
     train_rows: &[crate::features::FeatureRow],
     valid_rows: &[crate::features::FeatureRow],
-    feature_set: FeatureSet,
 ) -> Vec<u8> {
     if train_rows.is_empty() || valid_rows.is_empty() {
         return Vec::new();
@@ -597,7 +833,7 @@ fn threshold_baseline_predictions(
 
     let train_pairs = train_rows
         .iter()
-        .map(|r| (r.as_vec(feature_set).first().copied().unwrap_or(0.0), r.label))
+        .map(|r| (r.as_vec().first().copied().unwrap_or(0.0), r.label))
         .collect::<Vec<_>>();
     let mut candidates = train_pairs.iter().map(|(v, _)| *v).collect::<Vec<_>>();
     candidates.sort_by(|a, b| a.total_cmp(b));
@@ -620,14 +856,56 @@ fn threshold_baseline_predictions(
     valid_rows
         .iter()
         .map(|r| {
-            let v = r.as_vec(feature_set).first().copied().unwrap_or(0.0);
-            if v >= best_threshold {
-                1
-            } else {
-                0
-            }
+            let v = r.as_vec().first().copied().unwrap_or(0.0);
+            if v >= best_threshold { 1 } else { 0 }
         })
         .collect::<Vec<_>>()
+}
+
+fn tune_threshold_from_scores(y_true: &[u8], scores: &[f64]) -> (f64, BinaryMetrics) {
+    if y_true.is_empty() || y_true.len() != scores.len() {
+        return (0.5, BinaryMetrics::default());
+    }
+
+    let mut candidates = scores.to_vec();
+    candidates.sort_by(|a, b| a.total_cmp(b));
+    candidates.dedup_by(|a, b| (*a - *b).abs() < 1e-12);
+
+    if candidates.is_empty() {
+        return (0.5, BinaryMetrics::default());
+    }
+
+    let step = (candidates.len() / 256).max(1);
+    let mut sampled = candidates.into_iter().step_by(step).collect::<Vec<_>>();
+    if let Some(last) = scores.iter().copied().max_by(|a, b| a.total_cmp(b)) {
+        sampled.push(last);
+    }
+
+    let mut best_threshold = sampled[0];
+    let mut best_metrics = BinaryMetrics::default();
+    let mut seen = false;
+
+    for threshold in sampled {
+        let pred = scores
+            .iter()
+            .map(|v| if *v >= threshold { 1 } else { 0 })
+            .collect::<Vec<_>>();
+        let metrics = binary_metrics(y_true, &pred);
+
+        if !seen
+            || metrics.f1 > best_metrics.f1
+            || ((metrics.f1 - best_metrics.f1).abs() < 1e-12
+                && (metrics.recall > best_metrics.recall
+                    || ((metrics.recall - best_metrics.recall).abs() < 1e-12
+                        && metrics.precision > best_metrics.precision)))
+        {
+            best_threshold = threshold;
+            best_metrics = metrics;
+            seen = true;
+        }
+    }
+
+    (best_threshold, best_metrics)
 }
 
 fn main() {

@@ -14,12 +14,27 @@ pub fn render_process_row(
     let name = row.name.as_str();
     let cpu_top = row.cpu_top;
     let cpu_rel = row.cpu_rel;
+    let is_anomalous = row.is_anomalous;
 
     rsx! {
         tr {
-            class: if selected { "selected-row" } else { "" },
+            class: if selected {
+                "selected-row"
+            } else if is_anomalous {
+                "anomaly-row"
+            } else {
+                ""
+            },
 
             td {
+                class: "pid-cell",
+                if is_anomalous {
+                    span {
+                        class: "hazard-indicator",
+                        title: "This process is suspected to leak memory",
+                        "⚠"
+                    }
+                }
                 button {
                     onclick: move |_| on_select.call(pid),
                     "{pid}"

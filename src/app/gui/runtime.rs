@@ -26,7 +26,8 @@ pub async fn run_sync_loop(
                 match event {
                     BackendEvent::Snapshot(snapshot) => {
                         state.with_mut(|state| {
-                            state.rows = cpu_rows_from_dtos(&snapshot.cpu);
+                            state.anomaly_by_pid = snapshot.anomaly_by_pid;
+                            state.rows = cpu_rows_from_dtos(&snapshot.cpu, &state.anomaly_by_pid);
                             state.thread_rows = thread_rows_from_dtos(&snapshot.threads);
                             state.network_rows = network_rows_from_dtos(&snapshot.network);
                             state.cmdline_by_pid = snapshot.cmdline_by_pid;

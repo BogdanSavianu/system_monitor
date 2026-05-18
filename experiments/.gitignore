@@ -1,4 +1,4 @@
-dataset/*
+dataset*
 leaks/data/*
 leaks/README.md
 leaks/steady_leak
@@ -8,3 +8,10 @@ leaks/subtle_leak
 leaks/control_workload
 leaks/cpu_spiky_stable_mem
 leaks/noisy_leak
+*csv
+*meta
+*json
+*log
+*txt
+*tsv
+*pkl
