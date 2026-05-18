@@ -1,0 +1,27 @@
+@use "variables" as *;
+
+.anomaly-row {
+  background: rgba(220, 38, 38, 0.06);
+}
+
+.pid-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hazard-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: #b91c1c;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+
+.hazard-indicator:hover {
+  color: #b91c1c;
+}

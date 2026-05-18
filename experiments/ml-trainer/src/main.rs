@@ -1,0 +1,916 @@
+mod dataset;
+mod eval;
+mod features;
+mod model_xgb;
+
+use std::env;
+use std::fs;
+
+use anyhow::{Context, Result, bail};
+use serde::Serialize;
+
+use crate::dataset::{
+    csv_paths_from_dir, csv_paths_from_manifest, load_runs_from_csv_paths, split_runs_by_ratio,
+    split_runs_validation_scenarios,
+};
+use crate::eval::{BinaryMetrics, binary_metrics};
+use crate::features::build_feature_rows;
+use crate::model_xgb::{XGBoostConfig, XGBoostModel};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Algorithm {
+    XGBoost,
+}
+
+impl Algorithm {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "xgboost" | "xgb" => Some(Self::XGBoost),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::XGBoost => "xgboost",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SplitPolicy {
+    Run,
+    ScenarioValidation,
+}
+
+impl SplitPolicy {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "run" => Some(Self::Run),
+            "scenario_validation" => Some(Self::ScenarioValidation),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Run => "run",
+            Self::ScenarioValidation => "scenario_validation",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct SanityReport {
+    threshold_baseline: MetricsReport,
+    shuffled_labels_model: MetricsReport,
+}
+
+#[derive(Debug, Serialize)]
+struct MetricsReport {
+    accuracy: f64,
+    precision: f64,
+    recall: f64,
+    f1: f64,
+}
+
+#[derive(Debug, Clone)]
+struct Args {
+    dataset_dir: Option<String>,
+    manifest: Option<String>,
+    valid_dataset_dir: Option<String>,
+    valid_manifest: Option<String>,
+    model_in: Option<String>,
+    model_out: Option<String>,
+    split_policy: SplitPolicy,
+    run_sanity_checks: bool,
+    algorithm: Algorithm,
+    xgb_n_estimators: usize,
+    xgb_max_depth: u16,
+    xgb_learning_rate: f64,
+    xgb_min_child_weight: usize,
+    xgb_lambda: f64,
+    xgb_gamma: f64,
+    xgb_subsample: f64,
+    xgb_threshold: Option<f64>,
+    window: usize,
+    train_ratio: f64,
+    out: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TrainingReport {
+    split_mode: String,
+    split_policy: String,
+    model_in: Option<String>,
+    model_out: Option<String>,
+    sanity: Option<SanityReport>,
+    train_runs: usize,
+    valid_runs: usize,
+    train_rows: usize,
+    valid_rows: usize,
+    window: usize,
+    train_ratio: f64,
+    accuracy: f64,
+    precision: f64,
+    recall: f64,
+    f1: f64,
+}
+
+fn parse_args() -> Result<Args> {
+    let mut dataset_dir: Option<String> = None;
+    let mut manifest: Option<String> = None;
+    let mut valid_dataset_dir: Option<String> = None;
+    let mut valid_manifest: Option<String> = None;
+    let mut model_in: Option<String> = None;
+    let mut model_out: Option<String> = None;
+    let mut split_policy = SplitPolicy::Run;
+    let mut run_sanity_checks = false;
+    let mut algorithm = Algorithm::XGBoost;
+    let xgb_defaults = XGBoostConfig::default();
+    let mut xgb_n_estimators: usize = xgb_defaults.n_estimators;
+    let mut xgb_max_depth: u16 = xgb_defaults.max_depth;
+    let mut xgb_learning_rate: f64 = xgb_defaults.learning_rate;
+    let mut xgb_min_child_weight: usize = xgb_defaults.min_child_weight;
+    let mut xgb_lambda: f64 = xgb_defaults.lambda;
+    let mut xgb_gamma: f64 = xgb_defaults.gamma;
+    let mut xgb_subsample: f64 = xgb_defaults.subsample;
+    let mut xgb_threshold: Option<f64> = None;
+    let mut window: usize = 24;
+    let mut train_ratio: f64 = 0.8;
+    let mut out: Option<String> = None;
+
+    let args: Vec<String> = env::args().skip(1).collect();
+    let mut i = 0usize;
+    while i < args.len() {
+        let arg = &args[i];
+
+        if arg == "--dataset-dir" {
+            let value = args.get(i + 1).context("--dataset-dir expects a value")?;
+            dataset_dir = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--dataset-dir=") {
+            dataset_dir = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+
+        if arg == "--manifest" {
+            let value = args.get(i + 1).context("--manifest expects a value")?;
+            manifest = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--manifest=") {
+            manifest = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+
+        if arg == "--valid-dataset-dir" {
+            let value = args
+                .get(i + 1)
+                .context("--valid-dataset-dir expects a value")?;
+            valid_dataset_dir = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--valid-dataset-dir=") {
+            valid_dataset_dir = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+
+        if arg == "--valid-manifest" {
+            let value = args
+                .get(i + 1)
+                .context("--valid-manifest expects a value")?;
+            valid_manifest = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--valid-manifest=") {
+            valid_manifest = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+
+        if arg == "--model-in" {
+            let value = args.get(i + 1).context("--model-in expects a value")?;
+            model_in = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--model-in=") {
+            model_in = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+
+        if arg == "--model-out" {
+            let value = args.get(i + 1).context("--model-out expects a value")?;
+            model_out = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--model-out=") {
+            model_out = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+
+        if arg == "--split-policy" {
+            let value = args.get(i + 1).context("--split-policy expects a value")?;
+            split_policy = SplitPolicy::parse(value)
+                .with_context(|| format!("invalid --split-policy value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--split-policy=") {
+            split_policy = SplitPolicy::parse(value)
+                .with_context(|| format!("invalid --split-policy value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--run-sanity-checks" {
+            run_sanity_checks = true;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--algorithm" {
+            let value = args.get(i + 1).context("--algorithm expects a value")?;
+            algorithm = Algorithm::parse(value)
+                .with_context(|| format!("invalid --algorithm value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+
+        if arg == "--xgb-n-estimators" {
+            let value = args
+                .get(i + 1)
+                .context("--xgb-n-estimators expects a value")?;
+            xgb_n_estimators = value
+                .parse::<usize>()
+                .with_context(|| format!("invalid --xgb-n-estimators value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-n-estimators=") {
+            xgb_n_estimators = value
+                .parse::<usize>()
+                .with_context(|| format!("invalid --xgb-n-estimators value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-max-depth" {
+            let value = args.get(i + 1).context("--xgb-max-depth expects a value")?;
+            xgb_max_depth = value
+                .parse::<u16>()
+                .with_context(|| format!("invalid --xgb-max-depth value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-max-depth=") {
+            xgb_max_depth = value
+                .parse::<u16>()
+                .with_context(|| format!("invalid --xgb-max-depth value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-learning-rate" {
+            let value = args
+                .get(i + 1)
+                .context("--xgb-learning-rate expects a value")?;
+            xgb_learning_rate = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-learning-rate value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-learning-rate=") {
+            xgb_learning_rate = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-learning-rate value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-min-child-weight" {
+            let value = args
+                .get(i + 1)
+                .context("--xgb-min-child-weight expects a value")?;
+            xgb_min_child_weight = value
+                .parse::<usize>()
+                .with_context(|| format!("invalid --xgb-min-child-weight value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-min-child-weight=") {
+            xgb_min_child_weight = value
+                .parse::<usize>()
+                .with_context(|| format!("invalid --xgb-min-child-weight value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-lambda" {
+            let value = args.get(i + 1).context("--xgb-lambda expects a value")?;
+            xgb_lambda = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-lambda value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-lambda=") {
+            xgb_lambda = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-lambda value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-gamma" {
+            let value = args.get(i + 1).context("--xgb-gamma expects a value")?;
+            xgb_gamma = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-gamma value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-gamma=") {
+            xgb_gamma = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-gamma value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-subsample" {
+            let value = args.get(i + 1).context("--xgb-subsample expects a value")?;
+            xgb_subsample = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-subsample value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-subsample=") {
+            xgb_subsample = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --xgb-subsample value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--xgb-threshold" {
+            let value = args.get(i + 1).context("--xgb-threshold expects a value")?;
+            xgb_threshold = Some(
+                value
+                    .parse::<f64>()
+                    .with_context(|| format!("invalid --xgb-threshold value '{}'", value))?,
+            );
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--xgb-threshold=") {
+            xgb_threshold = Some(
+                value
+                    .parse::<f64>()
+                    .with_context(|| format!("invalid --xgb-threshold value '{}'", value))?,
+            );
+            i += 1;
+            continue;
+        }
+
+        if let Some(value) = arg.strip_prefix("--algorithm=") {
+            algorithm = Algorithm::parse(value)
+                .with_context(|| format!("invalid --algorithm value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--window" {
+            let value = args.get(i + 1).context("--window expects a value")?;
+            window = value
+                .parse::<usize>()
+                .with_context(|| format!("invalid --window value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--window=") {
+            window = value
+                .parse::<usize>()
+                .with_context(|| format!("invalid --window value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--train-ratio" {
+            let value = args.get(i + 1).context("--train-ratio expects a value")?;
+            train_ratio = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --train-ratio value '{}'", value))?;
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--train-ratio=") {
+            train_ratio = value
+                .parse::<f64>()
+                .with_context(|| format!("invalid --train-ratio value '{}'", value))?;
+            i += 1;
+            continue;
+        }
+
+        if arg == "--out" {
+            let value = args.get(i + 1).context("--out expects a value")?;
+            out = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--out=") {
+            out = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+
+        bail!("unknown argument '{}'", arg);
+    }
+
+    if window < 2 {
+        bail!("--window must be >= 2");
+    }
+    if !(0.1..=0.95).contains(&train_ratio) {
+        bail!("--train-ratio must be in [0.1, 0.95]");
+    }
+    if xgb_n_estimators == 0 {
+        bail!("--xgb-n-estimators must be >= 1");
+    }
+    if xgb_max_depth == 0 {
+        bail!("--xgb-max-depth must be >= 1");
+    }
+    if xgb_learning_rate <= 0.0 {
+        bail!("--xgb-learning-rate must be > 0");
+    }
+    if xgb_subsample <= 0.0 || xgb_subsample > 1.0 {
+        bail!("--xgb-subsample must be in (0, 1]");
+    }
+    if valid_dataset_dir.is_some() && valid_manifest.is_some() {
+        bail!("provide only one of --valid-dataset-dir or --valid-manifest");
+    }
+    if model_in.is_some() && model_out.is_some() {
+        bail!("provide only one of --model-in or --model-out");
+    }
+    if model_in.is_some() && (valid_dataset_dir.is_some() || valid_manifest.is_some()) {
+        bail!(
+            "--model-in mode uses only one evaluation dataset; do not provide validation dataset arguments"
+        );
+    }
+    if dataset_dir.is_none() && manifest.is_none() {
+        dataset_dir = Some("./experiments/dataset_large".to_string());
+    }
+
+    Ok(Args {
+        dataset_dir,
+        manifest,
+        valid_dataset_dir,
+        valid_manifest,
+        model_in,
+        model_out,
+        split_policy,
+        run_sanity_checks,
+        algorithm,
+        xgb_n_estimators,
+        xgb_max_depth,
+        xgb_learning_rate,
+        xgb_min_child_weight,
+        xgb_lambda,
+        xgb_gamma,
+        xgb_subsample,
+        xgb_threshold,
+        window,
+        train_ratio,
+        out,
+    })
+}
+
+fn csv_paths_from_args(
+    dataset_dir: &Option<String>,
+    manifest: &Option<String>,
+    default_dir: &str,
+) -> Result<Vec<String>> {
+    if let Some(manifest_path) = manifest {
+        csv_paths_from_manifest(manifest_path)
+    } else {
+        let dir = dataset_dir.as_deref().unwrap_or(default_dir);
+        csv_paths_from_dir(dir)
+    }
+}
+
+fn run() -> Result<()> {
+    let args = parse_args()?;
+
+    if let Some(model_path) = &args.model_in {
+        let model_data = fs::read_to_string(model_path)
+            .with_context(|| format!("failed to read model from '{}'", model_path))?;
+        let parsed = serde_json::from_str::<serde_json::Value>(&model_data)
+            .with_context(|| format!("failed to parse model json '{}'", model_path))?;
+
+        let model = match parsed.get("model_type").and_then(|v| v.as_str()) {
+            Some("xgboost") => {
+                let xgb = XGBoostModel::load_from_path(model_path).with_context(|| {
+                    format!("failed to load xgboost model from '{}'", model_path)
+                })?;
+                xgb
+            }
+            Some(other) => {
+                bail!(
+                    "unsupported model_type '{}' in '{}'; only 'xgboost' is supported",
+                    other,
+                    model_path
+                );
+            }
+            None => {
+                bail!(
+                    "missing model_type in '{}'; only xgboost model files are supported",
+                    model_path
+                );
+            }
+        };
+        let eval_csv_paths = csv_paths_from_args(
+            &args.dataset_dir,
+            &args.manifest,
+            "./experiments/dataset_large",
+        )?;
+        let eval_runs = load_runs_from_csv_paths(&eval_csv_paths)?;
+        if eval_runs.is_empty() {
+            bail!("evaluation dataset has no runs");
+        }
+
+        let eval_rows = eval_runs
+            .iter()
+            .flat_map(|r| build_feature_rows(&r.samples, args.window))
+            .collect::<Vec<_>>();
+        if eval_rows.is_empty() {
+            bail!(
+                "not enough rows after feature-window transform; lower --window or add more data"
+            );
+        }
+
+        let y_true = eval_rows.iter().map(|r| r.label).collect::<Vec<_>>();
+        let y_pred = model.predict_labels(&eval_rows)?;
+        let metrics = binary_metrics(&y_true, &y_pred);
+
+        let split_mode = "saved_model_evaluation".to_string();
+        println!("ml-trainer complete");
+        println!("split_mode={}", split_mode);
+        println!("loaded_model={}", model_path);
+        println!("train_runs=0 valid_runs={}", eval_runs.len());
+        println!(
+            "train_rows=0 valid_rows={} window={}",
+            eval_rows.len(),
+            args.window
+        );
+        println!(
+            "accuracy={:.4} precision={:.4} recall={:.4} f1={:.4}",
+            metrics.accuracy, metrics.precision, metrics.recall, metrics.f1
+        );
+
+        if let Some(path) = args.out {
+            let report = TrainingReport {
+                split_mode,
+                split_policy: "n/a".to_string(),
+                model_in: Some(model_path.clone()),
+                model_out: None,
+                sanity: None,
+                train_runs: 0,
+                valid_runs: eval_runs.len(),
+                train_rows: 0,
+                valid_rows: eval_rows.len(),
+                window: args.window,
+                train_ratio: args.train_ratio,
+                accuracy: metrics.accuracy,
+                precision: metrics.precision,
+                recall: metrics.recall,
+                f1: metrics.f1,
+            };
+
+            let json = serde_json::to_string_pretty(&report)?;
+            fs::write(&path, json).with_context(|| format!("failed to write report '{}'", path))?;
+            println!("report={}", path);
+        }
+
+        return Ok(());
+    }
+
+    let train_csv_paths = csv_paths_from_args(
+        &args.dataset_dir,
+        &args.manifest,
+        "./experiments/dataset_large",
+    )?;
+    let train_source_runs = load_runs_from_csv_paths(&train_csv_paths)?;
+
+    let (split_mode, train_runs, valid_runs) =
+        if args.valid_manifest.is_some() || args.valid_dataset_dir.is_some() {
+            let valid_csv_paths = csv_paths_from_args(
+                &args.valid_dataset_dir,
+                &args.valid_manifest,
+                "./experiments/dataset_large",
+            )?;
+            let valid_source_runs = load_runs_from_csv_paths(&valid_csv_paths)?;
+            if train_source_runs.is_empty() {
+                bail!("training dataset has no runs");
+            }
+            if valid_source_runs.is_empty() {
+                bail!("validation dataset has no runs");
+            }
+            (
+                "external_validation_dataset".to_string(),
+                train_source_runs,
+                valid_source_runs,
+            )
+        } else {
+            if train_source_runs.len() < 2 {
+                bail!("need at least 2 runs for train/validation split");
+            }
+            let (train, valid) = match args.split_policy {
+                SplitPolicy::Run => split_runs_by_ratio(train_source_runs, args.train_ratio),
+                SplitPolicy::ScenarioValidation => {
+                    split_runs_validation_scenarios(train_source_runs, args.train_ratio)
+                }
+            };
+            ("in_dataset_run_split".to_string(), train, valid)
+        };
+
+    let train_rows = train_runs
+        .iter()
+        .flat_map(|r| build_feature_rows(&r.samples, args.window))
+        .collect::<Vec<_>>();
+    let valid_rows = valid_runs
+        .iter()
+        .flat_map(|r| build_feature_rows(&r.samples, args.window))
+        .collect::<Vec<_>>();
+
+    if train_rows.is_empty() || valid_rows.is_empty() {
+        bail!("not enough rows after feature-window transform; lower --window or add more data");
+    }
+
+    let train_has_pos = train_rows.iter().any(|r| r.label == 1);
+    let train_has_neg = train_rows.iter().any(|r| r.label == 0);
+    if !(train_has_pos && train_has_neg) {
+        bail!("training split has only one class; add more runs per class or adjust --train-ratio");
+    }
+
+    let valid_has_pos = valid_rows.iter().any(|r| r.label == 1);
+    let valid_has_neg = valid_rows.iter().any(|r| r.label == 0);
+    if !(valid_has_pos && valid_has_neg) {
+        bail!(
+            "validation split has only one class; add more runs per class or adjust --train-ratio"
+        );
+    }
+
+    let xgb_config = XGBoostConfig {
+        n_estimators: args.xgb_n_estimators,
+        max_depth: args.xgb_max_depth,
+        learning_rate: args.xgb_learning_rate,
+        min_child_weight: args.xgb_min_child_weight,
+        lambda: args.xgb_lambda,
+        gamma: args.xgb_gamma,
+        subsample: args.xgb_subsample,
+        threshold: args.xgb_threshold.unwrap_or(0.5),
+    };
+    let mut model =
+        XGBoostModel::train(&train_rows, &xgb_config).context("xgboost training failed")?;
+
+    if let Some(threshold) = args.xgb_threshold {
+        model.set_threshold(threshold);
+        println!("xgboost_threshold_fixed={:.6}", model.threshold());
+    } else {
+        let y_true = valid_rows.iter().map(|r| r.label).collect::<Vec<_>>();
+        let scores = model
+            .predict_scores(&valid_rows)
+            .context("xgboost score prediction failed")?;
+        let (best_threshold, tuned_metrics) = tune_threshold_from_scores(&y_true, &scores);
+        model.set_threshold(best_threshold);
+        println!("xgboost_threshold_tuned={:.6}", model.threshold());
+        println!(
+            "xgboost_threshold_metrics accuracy={:.4} precision={:.4} recall={:.4} f1={:.4}",
+            tuned_metrics.accuracy, tuned_metrics.precision, tuned_metrics.recall, tuned_metrics.f1
+        );
+    }
+
+    if let Some(model_path) = &args.model_out {
+        model
+            .save_to_path(model_path)
+            .with_context(|| format!("failed to save model to '{}'", model_path))?;
+        println!("saved_model={}", model_path);
+    }
+
+    let y_true = valid_rows.iter().map(|r| r.label).collect::<Vec<_>>();
+    let y_pred = model.predict_labels(&valid_rows)?;
+    let metrics = binary_metrics(&y_true, &y_pred);
+
+    println!("ml-trainer complete");
+    println!("split_mode={}", split_mode);
+    println!("split_policy={}", args.split_policy.as_str());
+    println!("algorithm={}", args.algorithm.as_str());
+    println!(
+        "train_runs={} valid_runs={}",
+        train_runs.len(),
+        valid_runs.len()
+    );
+    println!(
+        "train_rows={} valid_rows={} window={}",
+        train_rows.len(),
+        valid_rows.len(),
+        args.window
+    );
+    println!(
+        "accuracy={:.4} precision={:.4} recall={:.4} f1={:.4}",
+        metrics.accuracy, metrics.precision, metrics.recall, metrics.f1
+    );
+
+    let sanity = if args.run_sanity_checks {
+        let baseline_pred = threshold_baseline_predictions(&train_rows, &valid_rows);
+        let baseline_true = valid_rows.iter().map(|r| r.label).collect::<Vec<_>>();
+        let baseline_metrics = binary_metrics(&baseline_true, &baseline_pred);
+
+        let shuffled_rows = shuffled_label_rows(&train_rows);
+        let shuffled_model = XGBoostModel::train(&shuffled_rows, &xgb_config)
+            .context("xgboost sanity training failed")?;
+        let shuffled_pred = shuffled_model
+            .predict_labels(&valid_rows)
+            .context("sanity prediction failed")?;
+        let shuffled_metrics = binary_metrics(&baseline_true, &shuffled_pred);
+
+        println!(
+            "sanity_threshold accuracy={:.4} precision={:.4} recall={:.4} f1={:.4}",
+            baseline_metrics.accuracy,
+            baseline_metrics.precision,
+            baseline_metrics.recall,
+            baseline_metrics.f1
+        );
+        println!(
+            "sanity_shuffled accuracy={:.4} precision={:.4} recall={:.4} f1={:.4}",
+            shuffled_metrics.accuracy,
+            shuffled_metrics.precision,
+            shuffled_metrics.recall,
+            shuffled_metrics.f1
+        );
+
+        Some(SanityReport {
+            threshold_baseline: MetricsReport {
+                accuracy: baseline_metrics.accuracy,
+                precision: baseline_metrics.precision,
+                recall: baseline_metrics.recall,
+                f1: baseline_metrics.f1,
+            },
+            shuffled_labels_model: MetricsReport {
+                accuracy: shuffled_metrics.accuracy,
+                precision: shuffled_metrics.precision,
+                recall: shuffled_metrics.recall,
+                f1: shuffled_metrics.f1,
+            },
+        })
+    } else {
+        None
+    };
+
+    if let Some(path) = args.out {
+        let report = TrainingReport {
+            split_mode,
+            split_policy: args.split_policy.as_str().to_string(),
+            model_in: None,
+            model_out: args.model_out,
+            sanity,
+            train_runs: train_runs.len(),
+            valid_runs: valid_runs.len(),
+            train_rows: train_rows.len(),
+            valid_rows: valid_rows.len(),
+            window: args.window,
+            train_ratio: args.train_ratio,
+            accuracy: metrics.accuracy,
+            precision: metrics.precision,
+            recall: metrics.recall,
+            f1: metrics.f1,
+        };
+
+        let json = serde_json::to_string_pretty(&report)?;
+        fs::write(&path, json).with_context(|| format!("failed to write report '{}'", path))?;
+        println!("report={}", path);
+    }
+
+    Ok(())
+}
+
+fn shuffled_label_rows(rows: &[crate::features::FeatureRow]) -> Vec<crate::features::FeatureRow> {
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    let labels = rows.iter().map(|r| r.label).collect::<Vec<_>>();
+    let shift = (rows.len() / 3).max(1) % rows.len();
+    rows.iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let mut c = r.clone();
+            c.label = labels[(i + shift) % labels.len()];
+            c
+        })
+        .collect::<Vec<_>>()
+}
+
+fn threshold_baseline_predictions(
+    train_rows: &[crate::features::FeatureRow],
+    valid_rows: &[crate::features::FeatureRow],
+) -> Vec<u8> {
+    if train_rows.is_empty() || valid_rows.is_empty() {
+        return Vec::new();
+    }
+
+    let train_pairs = train_rows
+        .iter()
+        .map(|r| (r.as_vec().first().copied().unwrap_or(0.0), r.label))
+        .collect::<Vec<_>>();
+    let mut candidates = train_pairs.iter().map(|(v, _)| *v).collect::<Vec<_>>();
+    candidates.sort_by(|a, b| a.total_cmp(b));
+
+    let mut best_threshold = *candidates.first().unwrap_or(&0.0);
+    let mut best_f1 = -1.0f64;
+    for threshold in candidates.iter().step_by((candidates.len() / 64).max(1)) {
+        let pred = train_pairs
+            .iter()
+            .map(|(v, _)| if *v >= *threshold { 1 } else { 0 })
+            .collect::<Vec<_>>();
+        let y_true = train_pairs.iter().map(|(_, y)| *y).collect::<Vec<_>>();
+        let m = binary_metrics(&y_true, &pred);
+        if m.f1 > best_f1 {
+            best_f1 = m.f1;
+            best_threshold = *threshold;
+        }
+    }
+
+    valid_rows
+        .iter()
+        .map(|r| {
+            let v = r.as_vec().first().copied().unwrap_or(0.0);
+            if v >= best_threshold { 1 } else { 0 }
+        })
+        .collect::<Vec<_>>()
+}
+
+fn tune_threshold_from_scores(y_true: &[u8], scores: &[f64]) -> (f64, BinaryMetrics) {
+    if y_true.is_empty() || y_true.len() != scores.len() {
+        return (0.5, BinaryMetrics::default());
+    }
+
+    let mut candidates = scores.to_vec();
+    candidates.sort_by(|a, b| a.total_cmp(b));
+    candidates.dedup_by(|a, b| (*a - *b).abs() < 1e-12);
+
+    if candidates.is_empty() {
+        return (0.5, BinaryMetrics::default());
+    }
+
+    let step = (candidates.len() / 256).max(1);
+    let mut sampled = candidates.into_iter().step_by(step).collect::<Vec<_>>();
+    if let Some(last) = scores.iter().copied().max_by(|a, b| a.total_cmp(b)) {
+        sampled.push(last);
+    }
+
+    let mut best_threshold = sampled[0];
+    let mut best_metrics = BinaryMetrics::default();
+    let mut seen = false;
+
+    for threshold in sampled {
+        let pred = scores
+            .iter()
+            .map(|v| if *v >= threshold { 1 } else { 0 })
+            .collect::<Vec<_>>();
+        let metrics = binary_metrics(y_true, &pred);
+
+        if !seen
+            || metrics.f1 > best_metrics.f1
+            || ((metrics.f1 - best_metrics.f1).abs() < 1e-12
+                && (metrics.recall > best_metrics.recall
+                    || ((metrics.recall - best_metrics.recall).abs() < 1e-12
+                        && metrics.precision > best_metrics.precision)))
+        {
+            best_threshold = threshold;
+            best_metrics = metrics;
+            seen = true;
+        }
+    }
+
+    (best_threshold, best_metrics)
+}
+
+fn main() {
+    if let Err(err) = run() {
+        eprintln!("error: {err}");
+        std::process::exit(1);
+    }
+}

@@ -22,6 +22,7 @@ pub struct CpuSnapshot {
     pub cmdline_by_pid: HashMap<Pid, String>,
     pub total_cpu_top: f64,
     pub system_mem_used_kb: u64,
+    pub anomaly_by_pid: HashMap<Pid, bool>,
 }
 
 #[derive(Debug)]
@@ -92,6 +93,7 @@ pub fn spawn_backend(
                     cmdline_by_pid,
                     total_cpu_top: observation.total_cpu_top,
                     system_mem_used_kb: observation.system_mem_used_kb,
+                    anomaly_by_pid: observation.anomaly_by_pid,
                 })
             })();
 
