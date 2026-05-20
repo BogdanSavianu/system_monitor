@@ -194,6 +194,15 @@
   font-weight: 600;
 }
 
+.sortable-header {
+  cursor: pointer;
+  user-select: none;
+}
+
+.sortable-header:hover {
+  color: #1e293b;
+}
+
 .selected-row {
   background: rgba(15, 118, 110, 0.08);
 }
@@ -346,6 +355,87 @@
 
 .list button:hover {
   border-color: #0f766e;
+}
+
+.detected-leaks-panel {
+  margin-top: 14px;
+  border-top: 1px solid #dbe3ec;
+  padding-top: 12px;
+}
+
+.detected-leaks-panel h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.detected-leaks-subtitle {
+  margin: 6px 0 10px;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.detected-leaks-table td,
+.detected-leaks-table th {
+  font-size: 0.84rem;
+}
+
+.detected-leaks-empty {
+  color: #64748b;
+  text-align: center;
+}
+
+.status-active {
+  color: #166534;
+  font-weight: 600;
+}
+
+.status-inactive {
+  color: #64748b;
+}
+
+.process-tree {
+  margin-top: 8px;
+}
+
+.process-tree-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.tree-toggle-btn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid #dbe3ec;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1e293b;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.tree-toggle-btn:hover {
+  border-color: #0f766e;
+  color: #0f766e;
+}
+
+.tree-leaf-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  color: #64748b;
+}
+
+.tree-node-name {
+  font-weight: 600;
+}
+
+.tree-node-pid {
+  color: #64748b;
+  font-size: 0.85rem;
 }
 
 .anomaly-row {

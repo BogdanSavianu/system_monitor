@@ -1,0 +1,37 @@
+@use "variables" as *;
+
+.detected-leaks-panel {
+  margin-top: 14px;
+  border-top: 1px solid $border;
+  padding-top: 12px;
+}
+
+.detected-leaks-panel h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.detected-leaks-subtitle {
+  margin: 6px 0 10px;
+  color: $muted;
+  font-size: 0.85rem;
+}
+
+.detected-leaks-table td,
+.detected-leaks-table th {
+  font-size: 0.84rem;
+}
+
+.detected-leaks-empty {
+  color: $muted;
+  text-align: center;
+}
+
+.status-active {
+  color: #166534;
+  font-weight: 600;
+}
+
+.status-inactive {
+  color: $muted;
+}

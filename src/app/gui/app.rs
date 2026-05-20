@@ -1,3 +1,5 @@
+#[cfg(feature = "dioxus-gui")]
+use dioxus_desktop::{Config, WindowBuilder};
 use system_monitor::util::ParseError;
 #[cfg(feature = "dioxus-gui")]
 use tracing::{info, warn};
@@ -19,8 +21,11 @@ use super::{
     settings_store::{
         GuiPersistentSettings, gui_settings_file_path, load_gui_settings, save_gui_settings,
     },
-    state::{GuiPage, GuiState},
-    views::{SettingsView, render_processes_view, render_system_view},
+    state::{GuiPage, GuiState, LeaksSortKey, MonitorSortKey},
+    views::{
+        SettingsView, render_leaks_view, render_process_tree_view, render_processes_view,
+        render_system_view,
+    },
 };
 #[cfg(feature = "dioxus-gui")]
 use crate::app::factory::MonitorBuildSettings;
@@ -103,7 +108,9 @@ fn restart_backend_with_settings(
 
 #[cfg(feature = "dioxus-gui")]
 pub fn run_gui_app() -> Result<(), ParseError> {
-    LaunchBuilder::desktop().launch(GuiApp);
+    LaunchBuilder::desktop()
+        .with_cfg(Config::new().with_window(WindowBuilder::new().with_title("System Monitor")))
+        .launch(GuiApp);
     Ok(())
 }
 
@@ -168,6 +175,10 @@ fn GuiApp() -> Element {
     let selected_pid = state_read.selected_pid;
     let details_expanded = state_read.details_expanded;
     let active_page = state_read.active_page;
+    let monitor_sort_key = state_read.monitor_sort_key;
+    let monitor_sort_direction = state_read.monitor_sort_direction;
+    let leaks_sort_key = state_read.leaks_sort_key;
+    let leaks_sort_direction = state_read.leaks_sort_direction;
     let settings_storage_enabled = state_read.settings_storage_enabled;
     let settings_anomaly_enabled = state_read.settings_anomaly_enabled;
     let status_line = state_read.status_line.clone();
@@ -206,9 +217,14 @@ fn GuiApp() -> Element {
                         &state_read.physical_mem_history_by_pid,
                         selected_pid,
                         details_expanded,
+                        monitor_sort_key,
+                        monitor_sort_direction,
                         &view_filter_text,
                         Callback::new(move |value| {
                             state.with_mut(|state| state.filter_text = value);
+                        }),
+                        Callback::new(move |key: MonitorSortKey| {
+                            state.with_mut(|state| state.toggle_monitor_sort(key));
                         }),
                         Callback::new(move |pid| {
                             state.with_mut(|state| {
@@ -219,6 +235,23 @@ fn GuiApp() -> Element {
                             state.with_mut(|state| {
                                 state.details_expanded = !state.details_expanded;
                             });
+                        }),
+                    )}
+                } else if active_page == GuiPage::Leaks {
+                    {render_leaks_view(
+                        &state_read.detected_leaks,
+                        leaks_sort_key,
+                        leaks_sort_direction,
+                        Callback::new(move |key: LeaksSortKey| {
+                            state.with_mut(|state| state.toggle_leaks_sort(key));
+                        }),
+                    )}
+                } else if active_page == GuiPage::Tree {
+                    {render_process_tree_view(
+                        &state_read.process_tree_roots,
+                        &state_read.process_tree_expanded,
+                        Callback::new(move |pid| {
+                            state.with_mut(|state| state.toggle_tree_node(pid));
                         }),
                     )}
                 } else if active_page == GuiPage::System {

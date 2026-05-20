@@ -15,6 +15,7 @@ DRY_RUN="0"
 FORCE="0"
 VARIANT_MODE="fixed"
 RUN_SEED=""
+EXTRA_PROGRAMS="0"
 
 usage() {
   cat <<EOF
@@ -25,6 +26,7 @@ options:
   --variant <fixed|jitter>                Parameter style (default: fixed)
   --seed <int>                            Seed for jittered params (default: current epoch)
   --interval <seconds>                    Common interval arg for scenarios (default: 1)
+  --extra-programs                        Also run arena/realloc/mmap extra generators
   --pid-file <path>                       Override pid tracking file
   --no-build                              Skip make before starting
   --dry-run                               Print commands without starting processes
@@ -58,6 +60,10 @@ while [[ $# -gt 0 ]]; do
     --pid-file)
       PID_FILE="${2:-}"
       shift 2
+      ;;
+    --extra-programs)
+      EXTRA_PROGRAMS="1"
+      shift
       ;;
     --no-build)
       BUILD_BINARIES="0"
@@ -211,8 +217,34 @@ EOF
 scenario_specs() {
   if [[ "$VARIANT_MODE" == "fixed" ]]; then
     scenario_specs_fixed
+    if [[ "$EXTRA_PROGRAMS" == "1" ]]; then
+      cat <<EOF
+arena_churn,$LEAKS_DIR/arena_churn_leak 80 4 64 12 $INTERVAL_S 0
+realloc,$LEAKS_DIR/realloc_leak 512 24 15 $INTERVAL_S 0
+mmap_sparse,$LEAKS_DIR/mmap_sparse_leak 6 256 20 $INTERVAL_S 0
+EOF
+    fi
   else
     scenario_specs_jitter
+    if [[ "$EXTRA_PROGRAMS" == "1" ]]; then
+      local arena_allocs arena_min_kb arena_max_kb arena_leak_pct
+      local realloc_base realloc_growth realloc_jump mmap_regions mmap_kb mmap_release
+      arena_allocs="$(rand_int 64 128)"
+      arena_min_kb="$(rand_int 2 8)"
+      arena_max_kb="$(rand_int 48 128)"
+      arena_leak_pct="$(rand_int 8 20)"
+      realloc_base="$(rand_int 384 768)"
+      realloc_growth="$(rand_int 12 40)"
+      realloc_jump="$(rand_int 10 24)"
+      mmap_regions="$(rand_int 4 10)"
+      mmap_kb="$(rand_int 128 384)"
+      mmap_release="$(rand_int 12 28)"
+      cat <<EOF
+arena_churn,$LEAKS_DIR/arena_churn_leak $arena_allocs $arena_min_kb $arena_max_kb $arena_leak_pct $INTERVAL_S 0
+realloc,$LEAKS_DIR/realloc_leak $realloc_base $realloc_growth $realloc_jump $INTERVAL_S 0
+mmap_sparse,$LEAKS_DIR/mmap_sparse_leak $mmap_regions $mmap_kb $mmap_release $INTERVAL_S 0
+EOF
+    fi
   fi
 }
 
@@ -275,6 +307,7 @@ start_action() {
   echo "indefinite leak processes started"
   echo "profile=$PROFILE"
   echo "variant=$VARIANT_MODE"
+  echo "extra_programs=$EXTRA_PROGRAMS"
   echo "seed=$RUN_SEED"
   echo "pid_file=$PID_FILE"
   echo "leak_pids=$pid_list"

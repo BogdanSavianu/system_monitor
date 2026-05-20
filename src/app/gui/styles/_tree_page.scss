@@ -1,0 +1,46 @@
+@use "variables" as *;
+
+.process-tree {
+  margin-top: 8px;
+}
+
+.process-tree-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.tree-toggle-btn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid $border;
+  border-radius: 6px;
+  background: #ffffff;
+  color: $text;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.tree-toggle-btn:hover {
+  border-color: $accent;
+  color: $accent;
+}
+
+.tree-leaf-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  color: $muted;
+}
+
+.tree-node-name {
+  font-weight: 600;
+}
+
+.tree-node-pid {
+  color: $muted;
+  font-size: 0.85rem;
+}

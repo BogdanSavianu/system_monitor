@@ -1,4 +1,4 @@
-all: steady_leak bursty_leak staircase_leak subtle_leak control_workload cpu_spiky_stable_mem noisy_leak
+all: steady_leak bursty_leak staircase_leak subtle_leak control_workload cpu_spiky_stable_mem noisy_leak arena_churn_leak realloc_leak mmap_sparse_leak
 
 run_id.o: run_id.c run_id.h
 	cc -c -o run_id.o run_id.c
@@ -24,7 +24,16 @@ cpu_spiky_stable_mem: cpu_spiky_stable_mem.c run_id.h run_id.o
 noisy_leak: noisy_leak.c run_id.h run_id.o
 	cc -o noisy_leak noisy_leak.c run_id.o
 
+arena_churn_leak: arena_churn_leak.c run_id.h run_id.o
+	cc -o arena_churn_leak arena_churn_leak.c run_id.o
+
+realloc_leak: realloc_leak.c run_id.h run_id.o
+	cc -o realloc_leak realloc_leak.c run_id.o
+
+mmap_sparse_leak: mmap_sparse_leak.c run_id.h run_id.o
+	cc -o mmap_sparse_leak mmap_sparse_leak.c run_id.o
+
 clean:
-	rm -f steady_leak bursty_leak staircase_leak subtle_leak control_workload cpu_spiky_stable_mem noisy_leak run_id.o
+	rm -f steady_leak bursty_leak staircase_leak subtle_leak control_workload cpu_spiky_stable_mem noisy_leak arena_churn_leak realloc_leak mmap_sparse_leak run_id.o
 
 .PHONY: all clean

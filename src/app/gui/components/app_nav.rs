@@ -26,6 +26,24 @@ pub fn AppNav(active_page: GuiPage, on_change: EventHandler<GuiPage>) -> Element
                 "System"
             }
             button {
+                class: if active_page == GuiPage::Leaks {
+                    "app-nav-btn active"
+                } else {
+                    "app-nav-btn"
+                },
+                onclick: move |_| on_change.call(GuiPage::Leaks),
+                "Leaks"
+            }
+            button {
+                class: if active_page == GuiPage::Tree {
+                    "app-nav-btn active"
+                } else {
+                    "app-nav-btn"
+                },
+                onclick: move |_| on_change.call(GuiPage::Tree),
+                "Tree"
+            }
+            button {
                 class: if active_page == GuiPage::Settings {
                     "app-nav-btn active"
                 } else {

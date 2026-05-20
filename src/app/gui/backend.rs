@@ -6,7 +6,9 @@ use std::{
 };
 
 use system_monitor::{
-    dto::{ProcessCpuSampleDTO, ProcessNetworkSampleDTO, ThreadCpuSampleDTO},
+    dto::{
+        ProcessCpuSampleDTO, ProcessHierarchyNodeDTO, ProcessNetworkSampleDTO, ThreadCpuSampleDTO,
+    },
     util::{ParseError, Pid},
 };
 use tracing::info;
@@ -17,6 +19,7 @@ use crate::app::{build_monitor_with_settings, factory::MonitorBuildSettings};
 pub struct CpuSnapshot {
     pub collected_at: SystemTime,
     pub cpu: Vec<ProcessCpuSampleDTO>,
+    pub hierarchy_roots: Vec<ProcessHierarchyNodeDTO>,
     pub threads: Vec<ThreadCpuSampleDTO>,
     pub network: Vec<ProcessNetworkSampleDTO>,
     pub cmdline_by_pid: HashMap<Pid, String>,
@@ -77,6 +80,7 @@ pub fn spawn_backend(
         loop {
             let snapshot = (|| -> Result<CpuSnapshot, ParseError> {
                 let observation = monitor.sample_observation_cycle()?;
+                let hierarchy_roots = monitor.sample_process_hierarchy_tree()?;
                 let threads = monitor.sample_thread_cpu_usage()?;
                 let cmdline_by_pid = monitor
                     .state()
@@ -88,6 +92,7 @@ pub fn spawn_backend(
                 Ok(CpuSnapshot {
                     collected_at: observation.collected_at,
                     cpu: observation.cpu,
+                    hierarchy_roots,
                     threads,
                     network: observation.network,
                     cmdline_by_pid,

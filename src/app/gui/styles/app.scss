@@ -1,4 +1,8 @@
 @use "base";
 @use "settings";
-@use "monitor";
+@use "shared_table";
+@use "monitor_page";
+@use "leaks_page";
+@use "tree_page";
+@use "system_page";
 @use "anomaly";
