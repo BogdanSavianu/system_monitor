@@ -3,8 +3,11 @@
 /.vscode
 /src/app/dioxus_demo/*
 /logs/*
+/doc*
+/.venv/*
 output.txt
 notes.md
 dioxus-setup.md
 error.txt
 commands.md
+texput.log

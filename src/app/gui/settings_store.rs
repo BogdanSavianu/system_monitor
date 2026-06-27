@@ -6,12 +6,18 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+fn default_tz_offset() -> i8 {
+    2
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct GuiPersistentSettings {
     #[serde(default)]
     pub storage_enabled: bool,
     #[serde(default)]
     pub anomaly_enabled: bool,
+    #[serde(default = "default_tz_offset")]
+    pub tz_offset_hours: i8,
 }
 
 impl Default for GuiPersistentSettings {
@@ -19,6 +25,7 @@ impl Default for GuiPersistentSettings {
         Self {
             storage_enabled: false,
             anomaly_enabled: false,
+            tz_offset_hours: default_tz_offset(),
         }
     }
 }

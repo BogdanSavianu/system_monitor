@@ -12,9 +12,10 @@ use crate::{
         NetworkParser, Parser, ProcessParser, ThreadParser, network_parser::TraitNetworkParser,
         parser::TraitProcessParser, thread_parser::TraitThreadParser,
     },
+    process::ProcessState,
     state::SystemState,
     storage::{StorageSink, TraitSampleAccumulator},
-    util::{ParseError, Pid, Tid},
+    util::{ParseError, Pid, Pm, Tid, Vm},
 };
 
 pub struct MonitorObservation {
@@ -25,6 +26,7 @@ pub struct MonitorObservation {
     pub system_mem_used_kb: u64,
     pub anomaly_by_pid: HashMap<Pid, bool>,
     pub anomaly_transitions: Vec<MonitorAnomalyTransition>,
+    pub load_avg: (f64, f64, f64),
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +47,10 @@ pub struct Monitor<
     accumulator: Option<Box<dyn TraitSampleAccumulator + Send>>,
     storage_sink: Option<Box<dyn StorageSink + Send>>,
     leak_detector: Option<MemoryLeakDetector>,
+    prev_process_io: HashMap<Pid, (u64, u64, SystemTime)>,
+    /// pids whose /proc/<pid>/io was unreadable last tick, skipped next tick to
+    /// avoid spamming open() on processes we cannot read
+    unreadable_io_pids: std::collections::HashSet<Pid>,
 }
 
 impl Monitor<ProcessParser, ThreadParser, NetworkParser> {
@@ -60,6 +66,8 @@ impl Monitor<ProcessParser, ThreadParser, NetworkParser> {
             accumulator: None,
             storage_sink: None,
             leak_detector: None,
+            prev_process_io: HashMap::new(),
+            unreadable_io_pids: std::collections::HashSet::new(),
         }
     }
 }
@@ -110,6 +118,8 @@ impl<
             accumulator,
             storage_sink,
             leak_detector,
+            prev_process_io: HashMap::new(),
+            unreadable_io_pids: std::collections::HashSet::new(),
         }
     }
 
@@ -122,6 +132,7 @@ impl<
         collected_at: SystemTime,
         cpu_samples: &[ProcessCpuSampleDTO],
         network_samples: &[ProcessNetworkSampleDTO],
+        anomaly_by_pid: &HashMap<Pid, bool>,
     ) {
         let Some(accumulator) = self.accumulator.as_mut() else {
             return;
@@ -135,6 +146,7 @@ impl<
             cpu_samples,
             network_samples,
             &self.system_state,
+            anomaly_by_pid,
         );
 
         let Some(batch) = maybe_batch else {
@@ -182,8 +194,33 @@ impl<
     }
 
     pub fn sample_cpu_usage_map(&mut self) -> Result<HashMap<Pid, f64>, ParseError> {
-        let (process_usage, _) = self.sample_usage_maps()?;
-        Ok(process_usage)
+        let total0 = self.previous_total_cpu.ok_or_else(|| {
+            ParseError::ParsingError("monitor sampling is not initialized".to_string())
+        })?;
+
+        let t0 = std::time::Instant::now();
+        self.parser
+            .refresh_process_snapshot_no_threads(&mut self.system_state);
+        info!(target: "monitor::timing", ms = t0.elapsed().as_millis(), "refresh_process_snapshot_no_threads");
+
+        let t1 = std::time::Instant::now();
+        let new_jiffies = self.parser.get_process_jiffies(&self.system_state);
+        info!(target: "monitor::timing", ms = t1.elapsed().as_millis(), "get_process_jiffies");
+
+        let t2 = std::time::Instant::now();
+        let total1 = self.parser.get_status_info()?.total_cpu;
+        info!(target: "monitor::timing", ms = t2.elapsed().as_millis(), "get_status_info");
+
+        let process_cpu_usage = self
+            .system_state
+            .calculate_cpu_usage(&new_jiffies, total0, total1);
+
+        self.system_state.update_jiffies(new_jiffies);
+        self.system_state
+            .set_total_proc_cpu_percentage(process_cpu_usage.total_proc_cpu_usage);
+        self.previous_total_cpu = Some(total1);
+
+        Ok(process_cpu_usage.usages_norm)
     }
 
     pub fn sample_thread_cpu_usage_map(&mut self) -> Result<HashMap<Tid, f64>, ParseError> {
@@ -235,7 +272,6 @@ impl<
     pub fn sample_process_network_stats(
         &mut self,
     ) -> Result<Vec<ProcessNetworkSampleDTO>, ParseError> {
-        self.parser.refresh_process_snapshot(&mut self.system_state);
         let stats_by_pid = self.sample_process_network_stats_map()?;
 
         let mut samples: Vec<ProcessNetworkSampleDTO> = stats_by_pid
@@ -266,6 +302,7 @@ impl<
     pub fn sample_observation_cycle(&mut self) -> Result<MonitorObservation, ParseError> {
         let collected_at = SystemTime::now();
         let cpu = self.sample_cpu_usage()?;
+        info!(target: "monitor::sampling", cpu_count = cpu.len(), "cpu samples ready");
         let network = self.sample_process_network_stats()?;
         let total_cpu_top = cpu.iter().map(|sample| sample.cpu_top).sum::<f64>();
         let system_status = self.parser.get_status_info()?;
@@ -273,8 +310,8 @@ impl<
             .mem_total_kb
             .saturating_sub(system_status.mem_available_kb);
 
-        self.persist_observation(collected_at, &cpu, &network);
-
+        // detector runs before persistence so the batch carries the per-sample
+        // anomaly verdict that replay reads back.
         let (anomaly_by_pid, anomaly_transitions) =
             if let Some(detector) = self.leak_detector.as_mut() {
                 let result = detector.evaluate(collected_at, &cpu);
@@ -292,6 +329,8 @@ impl<
             } else {
                 (HashMap::new(), Vec::new())
             };
+
+        self.persist_observation(collected_at, &cpu, &network, &anomaly_by_pid);
 
         for transition in &anomaly_transitions {
             if transition.is_anomalous {
@@ -311,6 +350,8 @@ impl<
             }
         }
 
+        let load_avg = read_load_avg();
+
         Ok(MonitorObservation {
             collected_at,
             cpu,
@@ -319,13 +360,13 @@ impl<
             system_mem_used_kb,
             anomaly_by_pid,
             anomaly_transitions,
+            load_avg,
         })
     }
 
     pub fn sample_process_hierarchy_indexes(
         &mut self,
     ) -> Result<ProcessHierarchyIndexDTO, ParseError> {
-        self.parser.refresh_process_snapshot(&mut self.system_state);
         let hierarchy = &self.system_state.process_hierarchy;
 
         Ok(ProcessHierarchyIndexDTO::with_values(
@@ -338,8 +379,6 @@ impl<
     pub fn sample_process_hierarchy_tree(
         &mut self,
     ) -> Result<Vec<ProcessHierarchyNodeDTO>, ParseError> {
-        self.parser.refresh_process_snapshot(&mut self.system_state);
-
         let mut roots = Vec::new();
         for root_pid in &self.system_state.process_hierarchy.roots {
             roots.push(self.build_hierarchy_node(*root_pid));
@@ -376,33 +415,107 @@ impl<
     // adapter method that turns the HashMap into a more serializable Vec
     pub fn sample_cpu_usage(&mut self) -> Result<Vec<ProcessCpuSampleDTO>, ParseError> {
         let usage_map = self.sample_cpu_usage_map()?;
+        info!(target: "monitor::sampling", usage_count = usage_map.len(), "usage map built");
         let num_cores = self.system_state.num_cores as f64;
         let usage_relative = self.system_state.calculate_relative_cpu_usage(
             &usage_map,
             self.system_state.get_total_proc_cpu_percentage(),
         );
 
-        let mut samples: Vec<ProcessCpuSampleDTO> = usage_map
+        let now = SystemTime::now();
+
+        struct ProcSnapshot {
+            pid: Pid,
+            cpu_norm: f64,
+            name: String,
+            virtual_mem: Vm,
+            physical_mem: Pm,
+            state: ProcessState,
+            swap_mem: u32,
+            fd_size: u32,
+        }
+        let snapshots: Vec<ProcSnapshot> = usage_map
             .into_iter()
             .filter_map(|(pid, cpu_norm)| {
-                self.system_state.get_process(pid).map(|proc_| {
-                    let cpu_rel = usage_relative.get(&pid).copied().unwrap_or(0.0);
-                    ProcessCpuSampleDTO::with_values(
-                        pid,
-                        proc_.name.clone(),
-                        cpu_norm,
-                        cpu_norm * num_cores,
-                        cpu_rel,
-                        proc_.virtual_mem,
-                        proc_.physical_mem,
-                    )
+                self.system_state.get_process(pid).map(|p| ProcSnapshot {
+                    pid,
+                    cpu_norm,
+                    name: p.name.clone(),
+                    virtual_mem: p.virtual_mem,
+                    physical_mem: p.physical_mem,
+                    state: p.state,
+                    swap_mem: p.swap_mem,
+                    fd_size: p.fd_size,
                 })
             })
             .collect();
 
+        let pids_in_cycle: Vec<Pid> = snapshots.iter().map(|s| s.pid).collect();
+
+        let mut samples: Vec<ProcessCpuSampleDTO> = snapshots
+            .into_iter()
+            .map(|s| {
+                let cpu_rel = usage_relative.get(&s.pid).copied().unwrap_or(0.0);
+                let (disk_read_kb_s, disk_write_kb_s) = self.sample_process_io_rate(s.pid, now);
+                ProcessCpuSampleDTO {
+                    pid: s.pid,
+                    name: s.name,
+                    cpu_norm: s.cpu_norm,
+                    cpu_top: s.cpu_norm * num_cores,
+                    cpu_rel,
+                    virtual_mem: s.virtual_mem,
+                    physical_mem: s.physical_mem,
+                    state: s.state,
+                    swap_mem: s.swap_mem,
+                    fd_count: s.fd_size,
+                    disk_read_kb_s,
+                    disk_write_kb_s,
+                }
+            })
+            .collect();
+
+        // evict counters for pids that disappeared so a recycled pid starts fresh
+        let alive: std::collections::HashSet<Pid> = pids_in_cycle.into_iter().collect();
+        self.prev_process_io.retain(|pid, _| alive.contains(pid));
+        self.unreadable_io_pids.retain(|pid| alive.contains(pid));
+
         samples.sort_by(|a, b| b.cpu_top.total_cmp(&a.cpu_top));
 
         Ok(samples)
+    }
+
+    /// diffs /proc/<pid>/io against last tick to get (read, write) KB/s
+    fn sample_process_io_rate(&mut self, pid: Pid, now: SystemTime) -> (f64, f64) {
+        if self.unreadable_io_pids.contains(&pid) {
+            return (0.0, 0.0);
+        }
+        let Some((read_bytes, write_bytes)) = self.parser.process_parser.get_io_bytes(pid) else {
+            self.unreadable_io_pids.insert(pid);
+            self.prev_process_io.remove(&pid);
+            return (0.0, 0.0);
+        };
+
+        let (read_kb_s, write_kb_s) = if let Some((prev_read, prev_write, prev_at)) =
+            self.prev_process_io.get(&pid).copied()
+        {
+            let dt_s = now
+                .duration_since(prev_at)
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(0.0);
+            if dt_s > 0.0 {
+                let dr = read_bytes.saturating_sub(prev_read) as f64;
+                let dw = write_bytes.saturating_sub(prev_write) as f64;
+                (dr / dt_s / 1024.0, dw / dt_s / 1024.0)
+            } else {
+                (0.0, 0.0)
+            }
+        } else {
+            (0.0, 0.0)
+        };
+
+        self.prev_process_io
+            .insert(pid, (read_bytes, write_bytes, now));
+        (read_kb_s, write_kb_s)
     }
 
     pub fn sample_thread_cpu_usage(&mut self) -> Result<Vec<ThreadCpuSampleDTO>, ParseError> {
@@ -455,4 +568,15 @@ impl<
     pub fn state(&self) -> &SystemState {
         &self.system_state
     }
+}
+
+fn read_load_avg() -> (f64, f64, f64) {
+    let Ok(content) = std::fs::read_to_string("/proc/loadavg") else {
+        return (0.0, 0.0, 0.0);
+    };
+    let mut parts = content.split_whitespace();
+    let la1 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    let la5 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    let la15 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    (la1, la5, la15)
 }

@@ -5,16 +5,33 @@ use crate::app::gui::view_models::{NetworkRowViewModel, ProcessRowViewModel, Thr
 
 use super::render_line_chart_svg;
 
-pub fn render_process_details(
-    selected_row: Option<&ProcessRowViewModel>,
-    selected_threads: &[&ThreadRowViewModel],
-    selected_network: Option<&NetworkRowViewModel>,
-    selected_cmdline: Option<&str>,
-    cpu_top_history: &[f64],
-    physical_mem_history_mb: &[f64],
-    expanded: bool,
-    on_toggle_expand: EventHandler<()>,
-) -> Element {
+pub struct ProcessDetailsProps<'a> {
+    pub selected_row: Option<&'a ProcessRowViewModel>,
+    pub selected_threads: &'a [&'a ThreadRowViewModel],
+    pub selected_network: Option<&'a NetworkRowViewModel>,
+    pub selected_cmdline: Option<&'a str>,
+    pub cpu_top_history: &'a [f64],
+    pub physical_mem_history_mb: &'a [f64],
+    pub restart_count: u32,
+    pub mem_baseline_mb: Option<f64>,
+    pub expanded: bool,
+    pub on_toggle_expand: EventHandler<()>,
+}
+
+pub fn render_process_details(props: ProcessDetailsProps) -> Element {
+    let ProcessDetailsProps {
+        selected_row,
+        selected_threads,
+        selected_network,
+        selected_cmdline,
+        cpu_top_history,
+        physical_mem_history_mb,
+        restart_count,
+        mem_baseline_mb,
+        expanded,
+        on_toggle_expand,
+    } = props;
+
     let cmdline_text = selected_cmdline.unwrap_or("(not available)");
     let max_cpu = cpu_top_history
         .iter()
@@ -179,6 +196,14 @@ pub fn render_process_details(
                         div { class: "details-value", "{selected.name}" }
                     }
                     div {
+                        class: "details-label", "Owner"
+                        div { class: "details-value", "{selected.username}" }
+                    }
+                    div {
+                        class: "details-label", "State"
+                        div { class: "details-value", "{selected.state}" }
+                    }
+                    div {
                         class: "details-label", "CPU top"
                         div { class: "details-value", "{selected.cpu_top:.2}%" }
                     }
@@ -193,6 +218,38 @@ pub fn render_process_details(
                     div {
                         class: "details-label", "Physical memory"
                         div { class: "details-value", "{selected.physical_mem / 1000} MB" }
+                    }
+                    div {
+                        class: "details-label", "Swap"
+                        div { class: "details-value", "{selected.swap_mem / 1000} MB" }
+                    }
+                    div {
+                        class: "details-label", "Open FDs"
+                        div { class: "details-value", "{selected.fd_count}" }
+                    }
+                    div {
+                        class: "details-label", "Disk read"
+                        div { class: "details-value", "{selected.disk_read_kb_s:.1} KB/s" }
+                    }
+                    div {
+                        class: "details-label", "Disk write"
+                        div { class: "details-value", "{selected.disk_write_kb_s:.1} KB/s" }
+                    }
+                    div {
+                        class: "details-label", "Restarts"
+                        div { class: "details-value", "{restart_count}" }
+                    }
+                    if let Some(baseline) = mem_baseline_mb {
+                        div {
+                            class: "details-label", "Mem baseline"
+                            div { class: "details-value",
+                                {
+                                    let current = selected.physical_mem as f64 / 1000.0;
+                                    let drift = current - baseline;
+                                    format!("{baseline:.1} MB avg ({drift:+.1} MB drift)")
+                                }
+                            }
+                        }
                     }
                 }
             } else {

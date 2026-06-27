@@ -19,6 +19,11 @@ dioxus-desktop = { version = "0.7", optional = true }
 native-tls = { version = "0.2", optional = true, features = ["vendored"] }
 futures-timer = { version = "3", optional = true }
 plotters = { version = "0.3", optional = true }
+time = { version = "0.3", features = ["formatting", "parsing"] }
+object = { version = "0.36", optional = true, default-features = false, features = ["read_core", "elf", "std"] }
+memmap2 = { version = "0.9", optional = true }
+tempfile = { version = "3", optional = true }
+addr2line = { version = "0.24", optional = true, default-features = false, features = ["std", "loader"] }
 
 [dependencies.rusqlite]
 version = "0.39.0"
@@ -30,4 +35,5 @@ features = [ "v4" ]
 
 [features]
 default = []
-dioxus-gui = ["dep:dioxus", "dep:dioxus-desktop", "dep:native-tls", "dep:futures-timer", "dep:plotters"]
+leakprobe = ["dep:object", "dep:memmap2", "dep:tempfile", "dep:addr2line"]
+dioxus-gui = ["leakprobe", "dep:dioxus", "dep:dioxus-desktop", "dep:native-tls", "dep:futures-timer", "dep:plotters"]
