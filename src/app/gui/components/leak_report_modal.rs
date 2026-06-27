@@ -543,4 +543,3 @@ fn format_elapsed(secs: u64) -> String {
         format!("{s}s")
     }
 }
-

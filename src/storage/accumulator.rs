@@ -145,14 +145,12 @@ impl TraitSampleAccumulator for DefaultSampleAccumulator {
             self.last_flush_at = Some(collected_at);
         }
 
-        self.pending
-            .processes
-            .extend(Self::build_process_samples(
-                collected_at,
-                process_samples,
-                state,
-                anomaly_by_pid,
-            ));
+        self.pending.processes.extend(Self::build_process_samples(
+            collected_at,
+            process_samples,
+            state,
+            anomaly_by_pid,
+        ));
         self.pending
             .network
             .extend(Self::build_network_samples(collected_at, network_samples));

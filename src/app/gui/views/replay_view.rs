@@ -3,15 +3,15 @@ use dioxus::prelude::*;
 use crate::app::gui::fmt::format_ts_ms;
 use crate::app::gui::replay::{
     data::{
-        visible_cpu_points_until_cursor, visible_memory_points_until_cursor,
-        visible_samples_until_cursor, visible_allocation_points_until_cursor,
+        visible_allocation_points_until_cursor, visible_cpu_points_until_cursor,
+        visible_memory_points_until_cursor, visible_samples_until_cursor,
     },
     state::ReplayState,
     types::{ReplaySample, ReplaySource},
 };
 
 use super::{
-    render_replay_chart, render_replay_controls, render_replay_timeline, ReplayControlsCallbacks,
+    ReplayControlsCallbacks, render_replay_chart, render_replay_controls, render_replay_timeline,
 };
 
 pub struct ReplayViewProps<'a> {
@@ -69,7 +69,8 @@ pub fn render_replay_view(props: ReplayViewProps) -> Element {
     let visible_samples = visible_samples_until_cursor(&replay.samples, replay.cursor_ms);
     let memory_points = visible_memory_points_until_cursor(&replay.samples, replay.cursor_ms);
     let cpu_points = visible_cpu_points_until_cursor(&replay.samples, replay.cursor_ms);
-    let allocation_points = visible_allocation_points_until_cursor(&replay.allocation_series, replay.cursor_ms);
+    let allocation_points =
+        visible_allocation_points_until_cursor(&replay.allocation_series, replay.cursor_ms);
     let sample_count = replay.samples.len();
     let scan_count = replay.scan_markers.len();
     let allocation_count = replay.allocation_series.len();
@@ -155,7 +156,8 @@ fn replay_stats(
     let min = values.iter().copied().fold(f64::INFINITY, f64::min);
     let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let mean = values.iter().sum::<f64>() / values.len() as f64;
-    let span_ms = samples.last().unwrap().collected_at_ms - samples.first().unwrap().collected_at_ms;
+    let span_ms =
+        samples.last().unwrap().collected_at_ms - samples.first().unwrap().collected_at_ms;
     let growth = if span_ms > 0 {
         (values.last().unwrap() - values.first().unwrap()) / (span_ms as f64 / 60_000.0)
     } else {

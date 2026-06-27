@@ -123,8 +123,16 @@ fn render_tree_node(
     let is_anomalous = node_stats.map(|s| s.is_anomalous).unwrap_or(false);
 
     let subtree_pids = collect_all_pids(std::slice::from_ref(node));
-    let subtree = if has_children { Some(aggregate_subtree(node, stats)) } else { None };
-    let child_label = if child_count == 1 { "1 child".to_string() } else { format!("{child_count} children") };
+    let subtree = if has_children {
+        Some(aggregate_subtree(node, stats))
+    } else {
+        None
+    };
+    let child_label = if child_count == 1 {
+        "1 child".to_string()
+    } else {
+        format!("{child_count} children")
+    };
 
     let mut sorted_children = node.children.clone();
     sorted_children.sort_by(|a, b| {
@@ -212,11 +220,20 @@ struct SubtreeTotals {
     process_count: usize,
 }
 
-fn aggregate_subtree(node: &ProcessHierarchyNodeViewModel, stats: &HashMap<Pid, NodeStats>) -> SubtreeTotals {
+fn aggregate_subtree(
+    node: &ProcessHierarchyNodeViewModel,
+    stats: &HashMap<Pid, NodeStats>,
+) -> SubtreeTotals {
     let mut cpu = 0.0_f64;
     let mut mem_mb = 0.0_f64;
     let mut process_count = 0_usize;
-    fn recurse(node: &ProcessHierarchyNodeViewModel, stats: &HashMap<Pid, NodeStats>, cpu: &mut f64, mem: &mut f64, count: &mut usize) {
+    fn recurse(
+        node: &ProcessHierarchyNodeViewModel,
+        stats: &HashMap<Pid, NodeStats>,
+        cpu: &mut f64,
+        mem: &mut f64,
+        count: &mut usize,
+    ) {
         if let Some(s) = stats.get(&node.pid) {
             *cpu += s.cpu_top;
             *mem += s.physical_mem_mb;
@@ -229,7 +246,11 @@ fn aggregate_subtree(node: &ProcessHierarchyNodeViewModel, stats: &HashMap<Pid, 
     for child in &node.children {
         recurse(child, stats, &mut cpu, &mut mem_mb, &mut process_count);
     }
-    SubtreeTotals { cpu, mem_mb, process_count }
+    SubtreeTotals {
+        cpu,
+        mem_mb,
+        process_count,
+    }
 }
 
 fn collect_all_pids(nodes: &[ProcessHierarchyNodeViewModel]) -> HashSet<Pid> {

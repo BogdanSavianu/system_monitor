@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use crate::util::Pid;
 
 use super::types::{
-    PersistedAllocScan, PersistedReachabilityScan, PersistedSampleBatch, StorageError,
-    StorageResult, StoredLeakedBlock, StoredProcessMemoryPoint, StoredReachabilityScan,
-    StoredSessionInfo, AllocationSnapshot, AllocationSnapshotRow,
+    AllocationSnapshot, AllocationSnapshotRow, PersistedAllocScan, PersistedReachabilityScan,
+    PersistedSampleBatch, StorageError, StorageResult, StoredLeakedBlock, StoredProcessMemoryPoint,
+    StoredReachabilityScan, StoredSessionInfo,
 };
 
 pub trait StorageSink {
@@ -97,10 +97,7 @@ pub trait StorageSink {
         ))
     }
 
-    fn query_leaked_blocks_for_scan(
-        &self,
-        _scan_id: i64,
-    ) -> StorageResult<Vec<StoredLeakedBlock>> {
+    fn query_leaked_blocks_for_scan(&self, _scan_id: i64) -> StorageResult<Vec<StoredLeakedBlock>> {
         Err(StorageError::InvalidData(
             "leaked block query is not supported by this sink".to_string(),
         ))

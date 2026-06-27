@@ -67,7 +67,8 @@ fn render_scan_marker(
     let left_pct = ratio * 100.0;
 
     // dominant leak class decides the marker colour.
-    let (class_suffix, class_label) = if marker.definitely_lost_bytes >= marker.indirectly_lost_bytes
+    let (class_suffix, class_label) = if marker.definitely_lost_bytes
+        >= marker.indirectly_lost_bytes
         && marker.definitely_lost_bytes >= marker.possibly_lost_bytes
         && marker.definitely_lost_bytes > 0
     {
@@ -112,7 +113,9 @@ fn render_scan_marker(
     }
 }
 
-fn build_annotation_svg(samples: &[crate::app::gui::replay::types::ReplaySample]) -> Option<String> {
+fn build_annotation_svg(
+    samples: &[crate::app::gui::replay::types::ReplaySample],
+) -> Option<String> {
     if samples.is_empty() {
         return None;
     }
