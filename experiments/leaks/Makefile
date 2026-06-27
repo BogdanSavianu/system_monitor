@@ -1,7 +1,8 @@
 CFLAGS ?= -O0 -g -fno-omit-frame-pointer
+CXXFLAGS ?= -O0 -g -fno-omit-frame-pointer
 RELEASE_CFLAGS ?= -O2 -fno-inline -fno-omit-frame-pointer
 
-all: steady_leak bursty_leak staircase_leak subtle_leak control_workload cpu_spiky_stable_mem noisy_leak arena_churn_leak realloc_leak mmap_sparse_leak calloc_leak multi_alloc_leak multi_alloc_leak_release
+all: steady_leak bursty_leak staircase_leak subtle_leak control_workload cpu_spiky_stable_mem noisy_leak arena_churn_leak realloc_leak mmap_sparse_leak calloc_leak multi_alloc_leak multi_alloc_leak_release cpp_alloc
 
 run_id.o: run_id.c run_id.h
 	cc $(CFLAGS) -c -o run_id.o run_id.c
@@ -46,9 +47,13 @@ multi_alloc_leak: multi_alloc_leak.c run_id.h run_id.o
 multi_alloc_leak_release: multi_alloc_leak.c run_id.h run_id.o
 	cc $(RELEASE_CFLAGS) -o multi_alloc_leak_release multi_alloc_leak.c run_id.o
 
+# C++ fixture: leaks via new / new[] / std::vector / std::string (all glibc heap)
+cpp_alloc_leak: cpp_alloc_leak.cpp run_id.h run_id.o
+	c++ $(CXXFLAGS) -o cpp_alloc_leak cpp_alloc_leak.cpp run_id.o
+
 debug: clean all
 
 clean:
-	rm -f steady_leak bursty_leak staircase_leak subtle_leak control_workload cpu_spiky_stable_mem noisy_leak arena_churn_leak realloc_leak mmap_sparse_leak calloc_leak multi_alloc_leak multi_alloc_leak_release run_id.o
+	rm -f steady_leak bursty_leak staircase_leak subtle_leak control_workload cpu_spiky_stable_mem noisy_leak arena_churn_leak realloc_leak mmap_sparse_leak calloc_leak multi_alloc_leak multi_alloc_leak_release cpp_alloc run_id.o
 
 .PHONY: all clean debug

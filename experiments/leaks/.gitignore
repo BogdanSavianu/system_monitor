@@ -11,3 +11,7 @@ noisy_leak
 arena_churn_leak
 mmap_sparse_leak
 realloc_leak
+cpp_alloc
+multi_alloc_leak
+multi_alloc_leak_release
+calloc_leak
