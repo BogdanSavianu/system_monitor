@@ -3,14 +3,14 @@ use std::io::{BufRead, BufReader, Read};
 use tracing::debug;
 
 use crate::model::ProcessStatusFileModel;
-use crate::process::Process;
+use crate::process::{Process, ProcessState};
 use crate::thread::Thread;
 use crate::util::{parser_utils::*, types::*};
 
 const BASE_PROC_PATH: &str = "/proc";
 
 pub trait TraitProcessParser {
-    fn parse_process(&self, file_path: &String) -> Result<Process, ParseError>;
+    fn parse_process(&self, file_path: &str) -> Result<Process, ParseError>;
     fn get_threads_for_pid(&self, pid: Pid) -> Result<Vec<Thread>, ParseError>;
     fn get_status_info(&self, pid: Pid) -> Result<ProcessStatusFileModel, ParseError>;
     // for now it returns utime and stime used for jiffies
@@ -18,12 +18,22 @@ pub trait TraitProcessParser {
     fn get_parent_pid(&self, pid: Pid) -> Result<Pid, ParseError>;
     fn get_process_name(&self, pid: Pid) -> Result<String, ParseError>;
     fn get_process_cmdline(&self, pid: Pid) -> Result<String, ParseError>;
+    fn get_process_state(&self, _pid: Pid) -> ProcessState {
+        ProcessState::Sleeping
+    }
+    fn get_fd_count(&self, _pid: Pid) -> u32 {
+        0
+    }
+    fn get_io_bytes(&self, _pid: Pid) -> Option<(u64, u64)> {
+        None
+    }
 }
 
 struct ProcessStatInfo {
     ppid: Pid,
     utime: u64,
     stime: u64,
+    state: char,
 }
 
 pub struct ProcessParser;
@@ -41,6 +51,8 @@ impl ProcessParser {
         let mut pm_size: Option<Pm> = None;
         let mut swap_size: Option<Pm> = None;
         let mut thread_count: Option<u32> = None;
+        let mut uid: u32 = 0;
+        let mut fd_size: u32 = 0;
 
         for line in reader.lines() {
             let line = line.map_err(|err| ParseError::ParsingError(err.to_string()))?;
@@ -49,6 +61,10 @@ impl ProcessParser {
             let value = parts.next();
 
             match (key, value) {
+                (Some("FDSize:"), Some(val)) => {
+                    fd_size = val.parse::<u32>().unwrap_or(0);
+                }
+
                 (Some("VmSize:"), Some(val)) => {
                     vm_size = Some(
                         val.parse::<Vm>()
@@ -80,6 +96,10 @@ impl ProcessParser {
                     );
                 }
 
+                (Some("Uid:"), Some(val)) => {
+                    uid = val.parse::<u32>().unwrap_or(0);
+                }
+
                 _ => {}
             }
 
@@ -93,9 +113,9 @@ impl ProcessParser {
         }
 
         match (vm_size, pm_size, swap_size, thread_count) {
-            (Some(vm), Some(pm), Some(swap), Some(th_count)) => {
-                Ok(ProcessStatusFileModel::new(vm, pm, swap, th_count))
-            }
+            (Some(vm), Some(pm), Some(swap), Some(th_count)) => Ok(ProcessStatusFileModel::new(
+                vm, pm, swap, th_count, uid, fd_size,
+            )),
             _ => Err(ParseError::ParsingError(
                 "VmSize or VmRSS not found in status".into(),
             )),
@@ -158,6 +178,8 @@ impl ProcessParser {
             ));
         }
 
+        let state = fields[0].chars().next().unwrap_or('S');
+
         let ppid = fields[1]
             .parse::<Pid>()
             .map_err(|err| ParseError::ParsingError(err.to_string()))?;
@@ -169,7 +191,12 @@ impl ProcessParser {
             .parse::<u64>()
             .map_err(|err| ParseError::ParsingError(err.to_string()))?;
 
-        Ok(ProcessStatInfo { ppid, utime, stime })
+        Ok(ProcessStatInfo {
+            ppid,
+            utime,
+            stime,
+            state,
+        })
     }
 
     fn normalize_cmdline(&self, s: &String) -> String {
@@ -188,22 +215,59 @@ impl ProcessParser {
     }
 }
 
+impl ProcessParser {
+    fn get_io_bytes_impl(&self, pid: Pid) -> Option<(u64, u64)> {
+        let file_path = format!("{BASE_PROC_PATH}/{pid}/io");
+        let file = File::open(file_path).ok()?;
+        let reader = BufReader::new(file);
+        let mut read_bytes: Option<u64> = None;
+        let mut write_bytes: Option<u64> = None;
+
+        for line in reader.lines() {
+            let Ok(line) = line else { continue };
+            let mut parts = line.split_whitespace();
+            match (parts.next(), parts.next()) {
+                (Some("read_bytes:"), Some(val)) => {
+                    read_bytes = val.parse().ok();
+                }
+                (Some("write_bytes:"), Some(val)) => {
+                    write_bytes = val.parse().ok();
+                }
+                _ => {}
+            }
+            if read_bytes.is_some() && write_bytes.is_some() {
+                break;
+            }
+        }
+
+        Some((read_bytes?, write_bytes?))
+    }
+}
+
 impl TraitProcessParser for ProcessParser {
-    fn parse_process(&self, file_path: &String) -> Result<Process, ParseError> {
+    fn parse_process(&self, file_path: &str) -> Result<Process, ParseError> {
         let pid = extract_pid_from_path(file_path)?;
         let mut process = Process::new(pid);
-        let ppid = self.get_parent_pid(pid)?;
+
+        let stat_path = format!("{BASE_PROC_PATH}/{pid}/stat");
+        let stat_file =
+            File::open(stat_path).map_err(|err| ParseError::ParsingError(err.to_string()))?;
+        let stat_info = self.parse_stat_info(BufReader::new(stat_file))?;
+
         let name = self.get_process_name(pid)?;
         let cmdline = self.get_process_cmdline(pid)?;
         let status_file_model = self.get_status_info(pid)?;
 
-        process.ppid = ppid;
+        process.ppid = stat_info.ppid;
         process.name = name;
         process.cmdline = cmdline;
         process.virtual_mem = status_file_model.virtual_mem;
         process.physical_mem = status_file_model.physical_mem;
         process.swap_mem = status_file_model.swap_mem;
         process.thread_count = status_file_model.thread_count;
+        process.uid = status_file_model.uid;
+        process.fd_size = status_file_model.fd_size;
+        process.state = ProcessState::from_char(stat_info.state);
 
         debug!(target: "parser::process", pid, name = process.name, "parsed process metadata");
 
@@ -276,6 +340,27 @@ impl TraitProcessParser for ProcessParser {
         let normalized = self.normalize_cmdline(&buf);
 
         Ok(normalized)
+    }
+
+    fn get_process_state(&self, pid: Pid) -> ProcessState {
+        let file_path = format!("{BASE_PROC_PATH}/{pid}/stat");
+        let Ok(file) = File::open(file_path) else {
+            return ProcessState::Sleeping;
+        };
+        let buf_reader = BufReader::new(file);
+        self.parse_stat_info(buf_reader)
+            .map(|info| ProcessState::from_char(info.state))
+            .unwrap_or(ProcessState::Sleeping)
+    }
+
+    fn get_fd_count(&self, pid: Pid) -> u32 {
+        fs::read_dir(format!("{BASE_PROC_PATH}/{pid}/fd"))
+            .map(|entries| entries.count() as u32)
+            .unwrap_or(0)
+    }
+
+    fn get_io_bytes(&self, pid: Pid) -> Option<(u64, u64)> {
+        self.get_io_bytes_impl(pid)
     }
 }
 

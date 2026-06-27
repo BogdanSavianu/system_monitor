@@ -1,0 +1,184 @@
+@use "variables" as *;
+
+.detected-leaks-panel {
+  margin-top: 14px;
+  border-top: 1px solid $border;
+  padding-top: 12px;
+}
+
+.detected-leaks-panel h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.detected-leaks-subtitle {
+  margin: 6px 0 10px;
+  color: $muted;
+  font-size: 0.85rem;
+}
+
+.detected-leaks-table td,
+.detected-leaks-table th {
+  font-size: 0.84rem;
+}
+
+.detected-leaks-empty {
+  color: $muted;
+  text-align: center;
+}
+
+.status-active {
+  color: #166534;
+  font-weight: 600;
+}
+
+.status-inactive {
+  color: $muted;
+}
+
+.leak-lifecycle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.leak-lifecycle-row {
+  white-space: nowrap;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.leak-alert-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+
+.leak-alert-text {
+  font-size: 0.88rem;
+  color: #b91c1c;
+  font-weight: 500;
+}
+
+.leak-alert-dismiss {
+  flex-shrink: 0;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #b91c1c;
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.leak-alert-dismiss:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.deep-scan-btn {
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.deep-scan-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.deep-scan-btn:disabled {
+  border-color: rgba(148, 163, 184, 0.5);
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.deep-scan-status {
+  font-size: 0.8rem;
+  color: #64748b;
+  font-style: italic;
+}
+
+.deep-scan-result {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.78rem;
+}
+
+.deep-scan-verdict {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.deep-scan-verdict-leaking {
+  color: #b91c1c;
+}
+
+.deep-scan-verdict-reclaimed {
+  color: #15803d;
+}
+
+.deep-scan-verdict-inconclusive {
+  color: #b45309;
+}
+
+.deep-scan-sites {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.deep-scan-site {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  // max-width: 320px;
+}
+
+.deep-scan-site-bytes {
+  font-weight: 600;
+  color: #334155;
+}
+
+.deep-scan-site-growth {
+  color: #64748b;
+}
+
+.deep-scan-site-frame {
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.deep-scan-failed {
+  color: #b91c1c;
+  font-size: 0.78rem;
+}
+
+.reachability-btn {
+  border: 1px solid rgba(168, 85, 247, 0.5);
+  border-radius: 6px;
+  background: #ffffff;
+  color: #6b21a8;
+  font-size: 0.78rem;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.reachability-btn:hover:not(:disabled) {
+  background: rgba(168, 85, 247, 0.1);
+}
+
+.reachability-btn:disabled {
+  border-color: rgba(148, 163, 184, 0.5);
+  color: #94a3b8;
+  cursor: not-allowed;
+}

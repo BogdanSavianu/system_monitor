@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
     time::{Duration, SystemTime},
@@ -9,6 +10,7 @@ use uuid::Uuid;
 use crate::{
     dto::{ProcessCpuSampleDTO, ProcessNetworkSampleDTO},
     state::SystemState,
+    util::Pid,
 };
 
 use super::{
@@ -23,6 +25,7 @@ pub trait TraitSampleAccumulator {
         process_samples: &[ProcessCpuSampleDTO],
         network_samples: &[ProcessNetworkSampleDTO],
         state: &SystemState,
+        anomaly_by_pid: &HashMap<Pid, bool>,
     ) -> Option<PersistedSampleBatch>;
 
     fn drain_pending(&mut self, collected_at: SystemTime) -> Option<PersistedSampleBatch>;
@@ -58,8 +61,10 @@ impl DefaultSampleAccumulator {
     }
 
     fn build_process_samples(
+        collected_at: SystemTime,
         process_samples: &[ProcessCpuSampleDTO],
         state: &SystemState,
+        anomaly_by_pid: &HashMap<Pid, bool>,
     ) -> Vec<PersistedProcessSample> {
         process_samples
             .iter()
@@ -88,12 +93,15 @@ impl DefaultSampleAccumulator {
                     virtual_mem: sample.virtual_mem,
                     physical_mem: sample.physical_mem,
                     thread_count,
+                    is_anomalous: anomaly_by_pid.get(&sample.pid).copied(),
+                    collected_at,
                 }
             })
             .collect()
     }
 
     fn build_network_samples(
+        collected_at: SystemTime,
         network_samples: &[ProcessNetworkSampleDTO],
     ) -> Vec<PersistedNetworkSample> {
         network_samples
@@ -108,6 +116,7 @@ impl DefaultSampleAccumulator {
                 tcp_listen: sample.tcp_listen,
                 udp_open: sample.udp_open,
                 total_sockets: sample.total_sockets,
+                collected_at,
             })
             .collect()
     }
@@ -130,17 +139,21 @@ impl TraitSampleAccumulator for DefaultSampleAccumulator {
         process_samples: &[ProcessCpuSampleDTO],
         network_samples: &[ProcessNetworkSampleDTO],
         state: &SystemState,
+        anomaly_by_pid: &HashMap<Pid, bool>,
     ) -> Option<PersistedSampleBatch> {
         if self.last_flush_at.is_none() {
             self.last_flush_at = Some(collected_at);
         }
 
-        self.pending
-            .processes
-            .extend(Self::build_process_samples(process_samples, state));
+        self.pending.processes.extend(Self::build_process_samples(
+            collected_at,
+            process_samples,
+            state,
+            anomaly_by_pid,
+        ));
         self.pending
             .network
-            .extend(Self::build_network_samples(network_samples));
+            .extend(Self::build_network_samples(collected_at, network_samples));
 
         if self.should_flush(collected_at) {
             return self.drain_pending(collected_at);

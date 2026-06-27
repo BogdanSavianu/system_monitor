@@ -1,0 +1,283 @@
+@use "variables" as *;
+
+.replay-page {
+  display: grid;
+  gap: 12px;
+}
+
+.replay-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.replay-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: $muted;
+}
+
+.replay-controls input {
+  border: 1px solid $border;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 0.82rem;
+  color: $text;
+  background: #ffffff;
+}
+
+.replay-primary-btn {
+  align-self: end;
+  border: 1px solid $accent;
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: $accent;
+  color: #ffffff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.replay-primary-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.replay-filter-results {
+  grid-column: 1 / -1;
+  border: 1px solid $border;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.replay-filter-results ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  max-height: 130px;
+  overflow: auto;
+}
+
+.replay-filter-dropdown {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.replay-filter-results li {
+  font-size: 0.8rem;
+  color: $text;
+  line-height: 1.3;
+}
+
+.replay-filter-option {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #ffffff;
+  color: $text;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.replay-filter-option:hover {
+  border-color: $accent;
+  background: rgba(15, 118, 110, 0.06);
+}
+
+.replay-filter-option.selected {
+  border-color: $accent;
+  background: rgba(15, 118, 110, 0.12);
+  font-weight: 600;
+}
+
+.replay-presets {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.replay-presets button {
+  border: 1px solid $border;
+  border-radius: 8px;
+  background: #ffffff;
+  color: $text;
+  font-size: 0.78rem;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.replay-presets button:hover {
+  border-color: $accent;
+  background: rgba(15, 118, 110, 0.06);
+}
+
+.replay-transport {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.replay-transport button,
+.replay-transport select {
+  border: 1px solid $border;
+  border-radius: 8px;
+  background: #ffffff;
+  color: $text;
+  font-size: 0.8rem;
+  padding: 6px 9px;
+}
+
+.replay-timeline {
+  margin-top: 8px;
+}
+
+.replay-annotation-strip {
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.replay-timeline input[type="range"] {
+  width: 100%;
+}
+
+.replay-sessions {
+  grid-column: 1 / -1;
+  border: 1px solid $border;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px 10px;
+}
+
+.replay-sessions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 0.82rem;
+  color: $muted;
+  font-weight: 600;
+}
+
+.replay-sessions-refresh {
+  border: 1px solid $border;
+  border-radius: 6px;
+  background: #ffffff;
+  color: $text;
+  font-size: 0.78rem;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.replay-sessions-refresh:hover {
+  border-color: $accent;
+  color: $accent;
+}
+
+.replay-sessions-refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.replay-sessions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.replay-session-option {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #ffffff;
+  color: $text;
+  padding: 5px 8px;
+  font-size: 0.8rem;
+  font-family: "JetBrains Mono", "Cascadia Mono", monospace;
+  cursor: pointer;
+}
+
+.replay-session-option:hover {
+  border-color: $accent;
+  background: rgba(15, 118, 110, 0.06);
+}
+
+.replay-chart-subtitle {
+  margin: 14px 0 4px 0;
+  font-size: 0.85rem;
+  color: $muted;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.replay-scan-marker-row {
+  position: relative;
+  height: 18px;
+  margin-bottom: 4px;
+}
+
+.replay-scan-marker {
+  position: absolute;
+  top: 0;
+  transform: translate(-50%, 0) rotate(45deg);
+  width: 10px;
+  height: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.4);
+  border-radius: 2px;
+  padding: 0;
+  cursor: pointer;
+  transition: transform 80ms ease-out;
+}
+
+.replay-scan-marker:hover {
+  transform: translate(-50%, -2px) rotate(45deg) scale(1.15);
+}
+
+.replay-scan-marker-definitely { background: rgba(239, 68, 68, 0.85); }
+.replay-scan-marker-indirectly { background: rgba(234, 88, 12, 0.85); }
+.replay-scan-marker-possibly   { background: rgba(234, 179, 8, 0.85); }
+.replay-scan-marker-reachable  { background: rgba(34, 197, 94, 0.85); }
+
+.replay-scan-marker-selected {
+  outline: 2px solid rgba(37, 99, 235, 0.9);
+  outline-offset: 2px;
+}
+
+.replay-scan-panel {
+  border-left: 4px solid rgba(168, 85, 247, 0.5);
+}
+
+.replay-stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.replay-export-btn {
+  border: 1px solid $border;
+  border-radius: 8px;
+  background: #ffffff;
+  color: $text;
+  font-size: 0.78rem;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.replay-export-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

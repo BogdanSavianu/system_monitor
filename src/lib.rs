@@ -1,4 +1,6 @@
 pub mod dto;
+#[cfg(feature = "leakprobe")]
+pub mod leakprobe;
 pub mod ml;
 pub mod model;
 pub mod monitor;

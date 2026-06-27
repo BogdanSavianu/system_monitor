@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use system_monitor::{
     dto::ProcessCpuSampleDTO,
+    process::ProcessState,
     util::{Pid, Pm, Vm},
 };
 
@@ -14,11 +15,18 @@ pub struct ProcessRowViewModel {
     pub virtual_mem: Vm,
     pub physical_mem: Pm,
     pub is_anomalous: bool,
+    pub state: ProcessState,
+    pub swap_mem: u32,
+    pub fd_count: u32,
+    pub disk_read_kb_s: f64,
+    pub disk_write_kb_s: f64,
+    pub username: String,
 }
 
 pub fn cpu_rows_from_dtos(
     samples: &[ProcessCpuSampleDTO],
     anomaly_by_pid: &HashMap<Pid, bool>,
+    username_by_pid: &HashMap<Pid, String>,
 ) -> Vec<ProcessRowViewModel> {
     samples
         .iter()
@@ -30,6 +38,15 @@ pub fn cpu_rows_from_dtos(
             virtual_mem: sample.virtual_mem,
             physical_mem: sample.physical_mem,
             is_anomalous: anomaly_by_pid.get(&sample.pid).copied().unwrap_or(false),
+            state: sample.state,
+            swap_mem: sample.swap_mem,
+            fd_count: sample.fd_count,
+            disk_read_kb_s: sample.disk_read_kb_s,
+            disk_write_kb_s: sample.disk_write_kb_s,
+            username: username_by_pid
+                .get(&sample.pid)
+                .cloned()
+                .unwrap_or_default(),
         })
         .collect()
 }

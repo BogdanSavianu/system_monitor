@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::fs::{File, read_dir};
 use std::io::{BufRead, BufReader};
+use std::sync::mpsc;
 use std::thread;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 use crate::hashmap;
@@ -44,6 +46,7 @@ impl<
 
     // this DOES NOT include jiffies
     pub fn parse_all_processes(&self) -> Vec<Process> {
+        let t_scan = std::time::Instant::now();
         let mut process_paths: Vec<String> = vec![];
         if let Ok(entries) = read_dir("/proc") {
             for entry in entries {
@@ -59,6 +62,7 @@ impl<
         } else {
             warn!(target: "parser::core", "failed to read /proc while parsing processes");
         }
+        info!(target: "parser::timing", ms = t_scan.elapsed().as_millis(), paths = process_paths.len(), "proc dir scan");
 
         if process_paths.is_empty() {
             debug!(target: "parser::core", "no process paths found in /proc");
@@ -69,6 +73,7 @@ impl<
         let chunk_size = process_paths.len().div_ceil(workers);
         let process_parser = &self.process_parser;
 
+        let t_parse = std::time::Instant::now();
         let mut processes: Vec<Process> = Vec::new();
         thread::scope(|scope| {
             let mut handles = Vec::new();
@@ -91,14 +96,9 @@ impl<
                 }
             }
         });
+        info!(target: "parser::timing", ms = t_parse.elapsed().as_millis(), workers, count = processes.len(), "parallel parse_process");
 
         processes.sort_by_key(|process| process.pid);
-        debug!(
-            target: "parser::core",
-            process_count = processes.len(),
-            workers,
-            "parsed process snapshot"
-        );
 
         processes
     }
@@ -200,22 +200,43 @@ impl<
         );
     }
 
+    pub fn refresh_process_snapshot_no_threads(&self, system_state: &mut SystemState) {
+        system_state.clear_process_snapshot();
+        let processes = self.parse_all_processes();
+
+        for process in processes {
+            system_state.insert_process(process);
+        }
+
+        system_state.rebuild_process_hierarchy();
+    }
+
     pub fn initialize_cpu_sampling(
         &self,
         system_state: &mut SystemState,
     ) -> Result<u64, ParseError> {
         info!(target: "parser::core", "initializing cpu sampling");
+
+        let t0 = std::time::Instant::now();
         self.refresh_process_snapshot(system_state);
+        info!(target: "parser::timing", ms = t0.elapsed().as_millis(), "init: refresh_process_snapshot (with threads)");
+
+        let t1 = std::time::Instant::now();
         self.refresh_network_snapshot(system_state)?;
+        info!(target: "parser::timing", ms = t1.elapsed().as_millis(), "init: refresh_network_snapshot");
 
         let sys0 = self.get_status_info()?;
         system_state.num_cores = sys0.num_cores;
 
+        let t2 = std::time::Instant::now();
         let prev_jiffies = self.get_process_jiffies(system_state);
         system_state.update_jiffies(prev_jiffies);
+        info!(target: "parser::timing", ms = t2.elapsed().as_millis(), "init: get_process_jiffies");
 
+        let t3 = std::time::Instant::now();
         let prev_thread_jiffies = self.get_thread_jiffies(system_state);
         system_state.update_thread_jiffies(prev_thread_jiffies);
+        info!(target: "parser::timing", ms = t3.elapsed().as_millis(), "init: get_thread_jiffies");
 
         debug!(
             target: "parser::core",
@@ -262,6 +283,56 @@ impl<
         ))
     }
 
+    // this has a tendency to hang so a process that does not respond within
+    // the timeout period gets skipped. known-stuck PIDs should be filtered out
+    // by the caller before passing them here.
+    pub fn collect_io_bytes_with_timeout(
+        &self,
+        pids: &[Pid],
+        timeout: Duration,
+    ) -> HashMap<Pid, (u64, u64)> {
+        if pids.is_empty() {
+            return HashMap::new();
+        }
+
+        let (tx, rx) = mpsc::channel::<(Pid, u64, u64)>();
+        let workers = worker_count(pids.len());
+        let chunk_size = pids.len().div_ceil(workers);
+
+        for chunk in pids.chunks(chunk_size) {
+            let chunk: Vec<Pid> = chunk.to_vec();
+            let tx = tx.clone();
+            thread::spawn(move || {
+                let parser = ProcessParser::new();
+                for pid in chunk {
+                    if let Some((r, w)) = parser.get_io_bytes(pid) {
+                        let _ = tx.send((pid, r, w));
+                    }
+                }
+            });
+        }
+        drop(tx);
+
+        let t = Instant::now();
+        let deadline = t + timeout;
+        let mut result = HashMap::new();
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                info!(target: "parser::timing", collected = result.len(), total = pids.len(), "io collection hit timeout");
+                break;
+            }
+            match rx.recv_timeout(remaining) {
+                Ok((pid, r, w)) => {
+                    result.insert(pid, (r, w));
+                }
+                Err(_) => break,
+            }
+        }
+        info!(target: "parser::timing", ms = t.elapsed().as_millis(), collected = result.len(), total = pids.len(), "collect_io_bytes");
+        result
+    }
+
     pub fn get_process_jiffies(&self, system_state: &SystemState) -> HashMap<Pid, u64> {
         let mut pids: Vec<Pid> = Vec::new();
         for process in system_state.processes.values() {
@@ -280,6 +351,7 @@ impl<
         let chunk_size = pids.len().div_ceil(workers);
         let process_parser = &self.process_parser;
 
+        let t = std::time::Instant::now();
         let mut jiffies: HashMap<Pid, u64> = hashmap![];
         thread::scope(|scope| {
             let mut handles = Vec::new();
@@ -304,6 +376,7 @@ impl<
                 }
             }
         });
+        info!(target: "parser::timing", ms = t.elapsed().as_millis(), pids = pids.len(), workers, "collect_process_jiffies");
 
         jiffies
     }
@@ -374,12 +447,13 @@ impl<
                 continue;
             }
 
-            if let Some(index) = key.strip_prefix("cpu") {
-                if !index.is_empty() && index.chars().all(|ch| ch.is_ascii_digit()) {
-                    cpus.push(self.sum_cpu_jiffies(&parts[1..])?);
-                    cpu_section_started = true;
-                    continue;
-                }
+            if let Some(index) = key.strip_prefix("cpu")
+                && !index.is_empty()
+                && index.chars().all(|ch| ch.is_ascii_digit())
+            {
+                cpus.push(self.sum_cpu_jiffies(&parts[1..])?);
+                cpu_section_started = true;
+                continue;
             }
 
             if cpu_section_started {
@@ -478,7 +552,7 @@ mod tests {
     struct DummyNetworkParser;
 
     impl TraitProcessParser for DummyProcessParser {
-        fn parse_process(&self, _file_path: &String) -> Result<Process, ParseError> {
+        fn parse_process(&self, _file_path: &str) -> Result<Process, ParseError> {
             Ok(Process::new(0))
         }
 

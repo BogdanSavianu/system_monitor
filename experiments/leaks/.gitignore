@@ -1,1 +1,13 @@
 *.o
+data/*
+README.md
+steady_leak
+bursty_leak
+staircase_leak
+subtle_leak
+control_workload
+cpu_spiky_stable_mem
+noisy_leak
+arena_churn_leak
+mmap_sparse_leak
+realloc_leak

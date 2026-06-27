@@ -1,0 +1,141 @@
+@use "variables" as *;
+
+.tree-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.tree-toolbar input {
+  border: 1px solid $border;
+  border-radius: 8px;
+  padding: 6px 8px;
+  min-width: 220px;
+}
+
+.tree-toolbar button,
+.tree-focus-btn {
+  border: 1px solid $border;
+  border-radius: 8px;
+  background: #ffffff;
+  color: $text;
+  font-size: 0.8rem;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.tree-toolbar button:hover,
+.tree-focus-btn:hover {
+  border-color: $accent;
+  color: $accent;
+}
+
+.process-tree {
+  margin-top: 8px;
+}
+
+.process-tree-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.tree-toggle-btn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid $border;
+  border-radius: 6px;
+  background: #ffffff;
+  color: $text;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.tree-toggle-btn:hover {
+  border-color: $accent;
+  color: $accent;
+}
+
+.tree-leaf-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  color: $muted;
+}
+
+.tree-node-name {
+  font-weight: 600;
+}
+
+.tree-node-pid {
+  color: $muted;
+  font-size: 0.85rem;
+}
+
+.tree-node-cpu {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: $accent;
+  min-width: 42px;
+}
+
+.tree-node-mem {
+  font-size: 0.8rem;
+  color: $muted;
+  min-width: 52px;
+}
+
+.tree-child-count {
+  font-size: 0.75rem;
+  color: $muted;
+  background: #f1f5f9;
+  border: 1px solid $border;
+  border-radius: 10px;
+  padding: 1px 7px;
+}
+
+.tree-node-anomalous > .tree-node-name {
+  color: #dc2626;
+}
+
+.tree-jump-btn {
+  border: 1px solid $border;
+  border-radius: 8px;
+  background: #ffffff;
+  color: $muted;
+  font-size: 0.75rem;
+  padding: 3px 7px;
+  cursor: pointer;
+  margin-left: 2px;
+}
+
+.tree-jump-btn:hover {
+  border-color: $accent;
+  color: $accent;
+}
+
+.tree-subtree-totals {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0 4px;
+}
+
+.tree-subtree-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: $muted;
+  min-width: 46px;
+}
+
+.tree-subtree-count {
+  font-size: 0.78rem;
+  color: $muted;
+}

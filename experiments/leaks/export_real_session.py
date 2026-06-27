@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 """Export one persisted monitor session from SQLite into ml-trainer CSV format.
-
-The output is compatible with experiments/ml-trainer/src/dataset.rs and includes
-an optional observed_memory_kb column for realistic-mode training.
 """
 
 from __future__ import annotations

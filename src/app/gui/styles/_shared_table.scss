@@ -1,0 +1,57 @@
+@use "variables" as *;
+
+.list-panel,
+.details-panel {
+  border: 1px solid $border;
+  border-radius: 12px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  border-bottom: 1px solid $border;
+  padding: 8px;
+  text-align: left;
+}
+
+.table th {
+  font-size: 0.9rem;
+  color: $muted;
+  font-weight: 600;
+}
+
+.sortable-header {
+  cursor: pointer;
+  user-select: none;
+}
+
+.sortable-header:hover {
+  color: $text;
+}
+
+.graph-line-wrap {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 180px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid $border;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.graph-svg-host {
+  width: 100%;
+  height: 100%;
+}
+
+.graph-svg-host svg {
+  width: 100%;
+  height: 100%;
+}
